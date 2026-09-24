@@ -30,7 +30,7 @@
   },
   "devDependencies": {
     "@guolao/vue-monaco-editor": "^1.6.0",
-    "@tailwindcss/vite": "^4.3.0",
+    "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^24.12.0",
     "@vitejs/plugin-vue": "^6.0.5",
     "@vue/tsconfig": "^0.9.0",
