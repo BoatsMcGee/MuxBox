@@ -32,7 +32,7 @@ jobs:
     outputs:
       app-version: ${{ steps.package-version.outputs.app-version }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - id: package-version
         run: echo "app-version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
 
