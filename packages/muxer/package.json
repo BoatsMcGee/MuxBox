@@ -1,0 +1,31 @@
+{
+    "name": "@app/muxer",
+    "version": "0.0.1",
+    "private": true,
+    "type": "module",
+    "files": [
+        "dist/**",
+        "package.json"
+    ],
+    "main": "./src/index.js",
+    "exports": {
+        ".": {
+            "types": "./src/index.ts",
+            "default": "./src/index.js"
+        },
+        "./coordinator-entry": {
+            "types": "./src/coordinator/coordinator-entry.ts",
+            "default": "./src/coordinator/coordinator-entry.js"
+        }
+    },
+    "scripts": {},
+    "dependencies": {
+        "@app/mediainfo": "*",
+        "@app/mkvtoolnix": "*",
+        "@app/tmdb": "*",
+        "@app/utils": "*",
+        "@ctrl/video-filename-parser": "^5.4.1",
+        "node-av": "^6.2.0-beta.11",
+        "sanitize-filename": "^1.6.4"
+    }
+}

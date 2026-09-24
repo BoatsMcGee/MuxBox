@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:graphite="https://graphite.art" viewBox="0 0 512 512" width="512" height="512"><defs><clipPath id="artboard-3638249828175630312"><rect x="0" y="0" width="512" height="512" /></clipPath></defs><g>
+<rect fill="#ffffff" fill-opacity="0" x="0" y="0" width="512" height="512"/>
+<g clip-path="url(#artboard-3638249828175630312)">
+	<g>
+		<g>
+			<g>
+				<path d="M256,106 C256,106 386,181 386,181 C386,181 256,256 256,256 C256,256 126,181 126,181 C126,181 256,106 256,106 Z" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" stroke="#000000"/>
+			</g>
+			<g>
+				<path d="M126,181 C126,181 256,256 256,256 C256,256 256,406 256,406 C256,406 126,331 126,331 C126,331 126,181 126,181 Z" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" stroke="#000000"/>
+			</g>
+			<g>
+				<path d="M386,181 C386,181 256,256 256,256 C256,256 256,406 256,406 C256,406 386,331 386,331 C386,331 386,181 386,181 Z" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" stroke="#000000"/>
+			</g>
+			<g>
+				<path d="M321,143.5 C321,143.5 191,218.5 191,218.5" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" stroke="#000000"/>
+			</g>
+			<g>
+				<path d="M191,143.5 C191,143.5 321,218.5 321,218.5" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" stroke="#000000"/>
+			</g>
+		</g>
+	</g>
+</g></g></svg>

@@ -1,0 +1,38 @@
+{
+  "name": "@app/preload",
+  "type": "module",
+  "files": [
+    "dist/**",
+    "package.json"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/_virtual_browser.mjs"
+    },
+    "./exposed.mjs": {
+      "types": "./src/exposed.d.ts",
+      "default": "./dist/exposed.mjs"
+    },
+    "./main": {
+      "types": "./src/main-exports.ts",
+      "default": "./dist/main-exports.mjs"
+    }
+  },
+  "dependencies": {
+    "@app/mediainfo": "*",
+    "@app/mkvtoolnix": "*",
+    "@app/projects": "*",
+    "@app/settings": "*"
+  },
+  "devDependencies": {
+    "@app/electron-versions": "*",
+    "mlly": "1.8.2",
+    "typescript": "6.0.2",
+    "vite": "8.0.3"
+  }
+}

@@ -1,0 +1,55 @@
+# Weekly prerelease build (Mondays 06:00 UTC), skipped when nothing changed
+# since the last v* tag. The version becomes
+# `<package.version>-nightly.<UTC timestamp>` so consecutive nightlies always
+# sort as newer releases for electron-updater.
+name: Nightly
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: Check for changes since last release
+    runs-on: ubuntu-latest
+    outputs:
+      should-run: ${{ steps.check.outputs.should-run }}
+      app-version: ${{ steps.check.outputs.app-version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - id: check
+        run: |
+          set -euo pipefail
+          last_tag=$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null || true)
+          if [ -z "$last_tag" ]; then
+            count=1
+          else
+            count=$(git rev-list --count "${last_tag}..HEAD")
+          fi
+          if [ "$count" -gt 0 ]; then should_run=true; else should_run=false; fi
+          base_version=$(jq -r .version package.json)
+          {
+            echo "should-run=$should_run"
+            echo "app-version=${base_version}-nightly.$(date -u +%Y%m%d%H%M%S)"
+          } >> "$GITHUB_OUTPUT"
+          echo "Commits since ${last_tag:-(repository start)}: $count"
+
+  release:
+    name: Build and publish nightly
+    needs: changes
+    if: needs.changes.outputs.should-run == 'true'
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/release.yml
+    with:
+      app-version: ${{ needs.changes.outputs.app-version }}
+      distribution-channel: nightly

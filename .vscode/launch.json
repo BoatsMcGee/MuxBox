@@ -1,0 +1,70 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Debug Main Process",
+      "runtimeExecutable": "${workspaceFolder}/node_modules/.bin/electron",
+      "runtimeArgs": [
+        "--inspect=9229",
+        "--remote-debugging-port=9222",
+        "${workspaceFolder}/packages/entry-point.mjs"
+      ],
+      "env": {
+        "NODE_ENV": "development",
+        "MODE": "development",
+        "VITE_DEV_SERVER_URL": "http://localhost:5173"
+      },
+      "autoAttachChildProcesses": true,
+      "console": "integratedTerminal",
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    },
+    {
+      "type": "node",
+      "request": "attach",
+      "name": "Attach to Main Process",
+      "port": 9229,
+      "restart": true,
+      "timeout": 30000,
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    },
+    {
+      "type": "chrome",
+      "request": "attach",
+      "name": "Attach to Renderer",
+      "port": 9223,
+      "urlFilter": "http://localhost:*",
+      "webRoot": "${workspaceFolder}/packages/renderer/src",
+      "sourceMapPathOverrides": {
+        "webpack:///./src/*": "${webRoot}/*",
+        "webpack:///src/*": "${webRoot}/*"
+      }
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Dev Mode (launch)",
+      "program": "${workspaceFolder}/packages/dev-mode.js",
+      "autoAttachChildProcesses": true,
+      "console": "integratedTerminal",
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Debug All (Main + Renderer)",
+      "configurations": [
+        "Dev Mode (launch)",
+        "Attach to Renderer"
+      ],
+      "stopAll": true
+    }
+  ]
+}

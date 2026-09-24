@@ -1,0 +1,29 @@
+{
+    "compilerOptions": {
+        "allowSyntheticDefaultImports": true,
+        "module": "NodeNext",
+        "target": "ESNext",
+        "lib": ["ESNext"],
+        "sourceMap": false,
+        "moduleResolution": "NodeNext",
+        "skipLibCheck": true,
+        "strict": true,
+        "isolatedModules": true,
+        "types": [
+            "node"
+        ],
+        "paths": {
+            "@app/*": [
+                "../*"
+            ]
+        }
+    },
+    "include": [
+        "src/**/*.ts",
+        "../../types/**/*.d.ts"
+    ],
+    "exclude": [
+        "**/*.spec.ts",
+        "**/*.test.ts"
+    ]
+}

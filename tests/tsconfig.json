@@ -1,0 +1,17 @@
+{
+  "extends": "../packages/renderer/tsconfig.app.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.tests.buildinfo",
+    "types": ["node", "vitest/globals", "vite/client"],
+    "paths": {
+      "@/*": ["../packages/renderer/src/*"],
+      "@app/*": ["../packages/*"]
+    }
+  },
+  "include": [
+    "./unit/**/*.ts",
+    "./shims-vue.d.ts",
+    "./integration/**/*.ts",
+    "../playwright.config.ts"
+  ]
+}

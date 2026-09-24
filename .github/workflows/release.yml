@@ -1,0 +1,158 @@
+# Tag-driven releases: push a `v*` tag, or call this workflow directly
+# (nightly.yml does the latter — a push with the default GITHUB_TOKEN never
+# triggers other workflows, so the nightly job chain must be explicit).
+#
+# Version → channel mapping (electron-builder derives the channel file from
+# the version's prerelease component):
+#   1.2.3              → latest.yml   (stable release)
+#   1.2.3-beta.1       → beta.yml     (marked --prerelease)
+#   1.2.3-nightly.<ts> → nightly.yml  (marked --prerelease)
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_call:
+    inputs:
+      app-version:
+        description: Version without the leading v (may include a prerelease part)
+        required: true
+        type: string
+      distribution-channel:
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: 'bash'
+
+permissions:
+  contents: read
+
+env:
+  NODE_NO_WARNINGS: 1
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+  npm_config_audit: false
+  npm_config_fund: false
+
+jobs:
+  prepare:
+    name: Derive version and channel
+    runs-on: ubuntu-latest
+    outputs:
+      app-version: ${{ steps.derive.outputs.app-version }}
+      distribution-channel: ${{ steps.derive.outputs.distribution-channel }}
+      prerelease: ${{ steps.derive.outputs.prerelease }}
+      tag: ${{ steps.derive.outputs.tag }}
+    steps:
+      - id: derive
+        env:
+          INPUT_VERSION: ${{ inputs.app-version }}
+          INPUT_CHANNEL: ${{ inputs.distribution-channel }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_VERSION" ]; then
+            version="$INPUT_VERSION"
+            channel="$INPUT_CHANNEL"
+          else
+            if [ "$REF_TYPE" != "tag" ]; then
+              echo "::error::release.yml must run for a v* tag or with workflow_call inputs"
+              exit 1
+            fi
+            version="${REF_NAME#v}"
+            case "$version" in
+              *-nightly.*) channel="nightly" ;;
+              *-beta.*)    channel="beta" ;;
+              *)           channel="latest" ;;
+            esac
+          fi
+          if [ "$channel" = "latest" ]; then prerelease=false; else prerelease=true; fi
+          {
+            echo "app-version=$version"
+            echo "distribution-channel=$channel"
+            echo "prerelease=$prerelease"
+            echo "tag=v$version"
+          } >> "$GITHUB_OUTPUT"
+
+  compile-and-test:
+    needs: prepare
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/compile-and-test.yml
+    with:
+      app-version: ${{ needs.prepare.outputs.app-version }}
+      distribution-channel: ${{ needs.prepare.outputs.distribution-channel }}
+
+  publish:
+    name: Publish GitHub release
+    needs: [prepare, compile-and-test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    environment:
+      name: ${{ needs.prepare.outputs.distribution-channel }}
+      url: https://github.com/${{ github.repository }}/releases/tag/${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+
+      # One directory per compile job — kept separate so the channel files
+      # can be merged instead of clobbered (see merge-update-files.mjs).
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: '*-${{ needs.prepare.outputs.distribution-channel }}'
+          path: dist-parts
+
+      - name: Merge multi-arch update metadata
+        run: node scripts/merge-update-files.mjs dist-parts dist
+
+      - name: Verify expected channel file exists
+        env:
+          CHANNEL: ${{ needs.prepare.outputs.distribution-channel }}
+        run: |
+          if [ ! -f "dist/${CHANNEL}.yml" ]; then
+            echo "::error::dist/${CHANNEL}.yml missing — electron-builder channel detection regressed"
+            ls -la dist
+            exit 1
+          fi
+
+      - name: Generate SHA256SUMS.txt
+        run: |
+          cd dist
+          sha256sum MuxBox-* *.yml > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          TARGET: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          files=(dist/MuxBox-* dist/*.yml dist/SHA256SUMS.txt)
+          if gh release view "$TAG" --repo "$REPO" > /dev/null 2>&1; then
+            # Re-run support: replace assets in place instead of failing.
+            gh release upload "$TAG" --repo "$REPO" --clobber "${files[@]}"
+          else
+            prerelease_args=()
+            if [ "$PRERELEASE" = "true" ]; then
+              prerelease_args=(--prerelease)
+            fi
+            gh release create "$TAG" --repo "$REPO" \
+              --target "$TARGET" \
+              --title "$TAG" \
+              --generate-notes \
+              "${prerelease_args[@]+"${prerelease_args[@]}"}" \
+              "${files[@]}"
+          fi

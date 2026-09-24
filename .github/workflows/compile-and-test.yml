@@ -1,0 +1,137 @@
+# Reusable pipeline: typecheck, lint, and a per-architecture compile matrix
+# with tests. Called by ci.yml (push/PR) and release.yml (tags/nightly).
+#
+# Matrix rationale:
+#   windows-latest    x64   full unit + integration + screenshot corpus
+#   windows-11-arm    arm64 native ARM build; opusenc is native ARM, mkvmerge
+#                           is the official x64 build under ARM emulation;
+#                           one-spec integration smoke
+#   macos-latest      arm64 dmg + zip (unsigned)
+#   macos-15-intel    x64   dmg + zip (unsigned)
+#   ubuntu-latest     x64   AppImage + deb + rpm
+name: Compile and test
+
+on:
+  workflow_call:
+    inputs:
+      app-version:
+        required: true
+        type: string
+      distribution-channel:
+        required: true
+        type: string
+
+defaults:
+  run:
+    shell: 'bash'
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+env:
+  NODE_NO_WARNINGS: 1
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+  npm_config_audit: false
+  npm_config_fund: false
+
+jobs:
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup
+        name: Setup
+      - run: npm run typecheck --if-present
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup
+        name: Setup
+      - run: npm run lint --if-present
+
+  compile:
+    name: Compile (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win32
+            arch: x64
+            compile-args: --win --x64
+          - os: windows-11-arm
+            platform: win32
+            arch: arm64
+            compile-args: --win --arm64
+          - os: macos-latest
+            platform: darwin
+            arch: arm64
+            compile-args: --mac --arm64
+          - os: macos-15-intel
+            platform: darwin
+            arch: x64
+            compile-args: --mac --x64
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+            compile-args: --linux --x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup
+        name: Setup
+
+      - name: Fetch bundled CLI tools (mkvmerge, opusenc)
+        run: node scripts/fetch-external-tools.mjs --arch ${{ matrix.arch }}
+
+      - name: Apply version
+        run: |
+          current=$(jq -r .version package.json)
+          if [ "$current" != "${{ inputs.app-version }}" ]; then
+            npm version "${{ inputs.app-version }}" --no-git-tag-version
+          fi
+
+      - run: npm run compile -- ${{ matrix.compile-args }} -p never
+        env:
+          VITE_DISTRIBUTION_CHANNEL: ${{ inputs.distribution-channel }}
+
+      # Unit tests (Vitest) run everywhere — they need no browser/display.
+      - run: npm run test:unit
+
+      # Integration tests drive the packaged Electron app and produce the
+      # screenshot corpus — Windows x64 (screenshots are captured there).
+      - run: npm run test:integration
+        if: matrix.os == 'windows-latest'
+
+      # Windows on ARM smoke: app boots against the real corpus and runs a
+      # representative spec end to end (native ARM opusenc, emulated mkvmerge).
+      - run: npm run test:integration -- tests/integration/tests/project.spec.ts
+        if: matrix.os == 'windows-11-arm'
+
+      - name: Upload screenshots
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v7
+        with:
+          name: screenshots
+          path: media/screenshots
+
+      # Publishable files only: installers, portable builds, update metadata.
+      # The artifact name doubles as the release download pattern.
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: "dist/MuxBox-*"
+
+      - name: Upload compiled app
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.os }}-${{ inputs.distribution-channel }}
+          path: |
+            dist/MuxBox-*
+            dist/*.yml
+            !dist/builder-debug.yml

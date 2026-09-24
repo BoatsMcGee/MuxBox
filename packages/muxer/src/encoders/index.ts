@@ -1,0 +1,1 @@
+export { pipeAudioToOpusenc, buildFfmpegDecodeArgs, type Options as OpusencOptions } from './opusenc.js';

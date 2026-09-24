@@ -1,0 +1,48 @@
+# Continuous integration: typecheck + lint + multi-platform compile + tests.
+# Runs on pushes to main and on pull requests. Releases live in release.yml.
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - '.editorconfig'
+      - '.idea/**'
+      - '.vscode/**'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - '.editorconfig'
+      - '.idea/**'
+      - '.vscode/**'
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Read package version
+    runs-on: ubuntu-latest
+    outputs:
+      app-version: ${{ steps.package-version.outputs.app-version }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: package-version
+        run: echo "app-version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
+
+  compile-and-test:
+    needs: prepare
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/compile-and-test.yml
+    with:
+      app-version: ${{ needs.prepare.outputs.app-version }}
+      distribution-channel: latest

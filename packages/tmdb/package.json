@@ -1,0 +1,21 @@
+{
+    "name": "@app/tmdb",
+    "version": "0.0.1",
+    "private": true,
+    "type": "module",
+    "files": [
+        "dist/**",
+        "package.json"
+    ],
+    "main": "src/index.js",
+    "exports": {
+        ".": {
+            "types": "./src/index.ts",
+            "default": "./src/index.js"
+        }
+    },
+    "scripts": {},
+    "dependencies": {
+        "@api-wrappers/tmdb-wrapper": "^2.0.1"
+    }
+}
