@@ -22,10 +22,11 @@ libopusenc, opus, and the MinGW runtime libraries).
 **macOS binaries**: `mkvmerge`/`mkvinfo` come from the official MKVToolNix
 DMG release (`mkvtoolnix.download` — the same upstream build as the Windows
 binaries above; Homebrew publishes no Intel-mac bottle for MKVToolNix),
-including its bundled Qt6 dylib. `opusenc` comes from repackaged
-[Homebrew](https://brew.sh/) bottles together with its runtime library
-closure (FLAC, libogg, opus, libopusenc, opusfile — SPDX identifiers for
-each formula are published at <https://formulae.brew.sh/>).
+including its bundled Qt6 dylib. `opusenc` comes from the repackaged
+[Homebrew](https://brew.sh/) opus-tools bottle together with exactly the
+homebrew-core runtime libraries its binaries link (discovered at fetch time;
+SPDX identifiers for each formula are published at
+<https://formulae.brew.sh/>).
 
 **Linux binaries** are repackaged [Homebrew](https://brew.sh/) bottles built
 from the sources above, together with their runtime library closure (Qt,

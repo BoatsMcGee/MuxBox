@@ -1,7 +1,7 @@
 import {describe, it, expect} from 'vitest';
 import {existsSync} from 'node:fs';
 import path from 'node:path';
-import {macosDmgName, macosDmgUrl, pickBottleTag, repositoryFromBottleUrl, tarExecutable} from '../../../scripts/fetch-external-tools.mjs';
+import {isRuntimeLibrary, macosDmgName, macosDmgUrl, parseBrewRef, pickBottleTag, repositoryFromBottleUrl, tarExecutable} from '../../../scripts/fetch-external-tools.mjs';
 
 describe('repositoryFromBottleUrl', () => {
     it('maps a versioned formula bottle url to its slash-separated repository', () => {
@@ -84,5 +84,39 @@ describe('macosDmgName', () => {
     it('builds a release-relative url', () => {
         expect(macosDmgUrl('x64'))
             .toBe('https://mkvtoolnix.download/macos/releases/102.0/MKVToolNix-102.0-2-x86_64.dmg');
+    });
+});
+
+describe('parseBrewRef', () => {
+    it('maps Cellar references, dropping the version segment', () => {
+        expect(parseBrewRef('/usr/local/Cellar/flac/1.5.0/lib/libFLAC.1.dylib'))
+            .toEqual({formula: 'flac', relative: 'lib/libFLAC.1.dylib'});
+    });
+
+    it('maps opt references, keeping versioned formula names intact', () => {
+        expect(parseBrewRef('/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib'))
+            .toEqual({formula: 'openssl@3', relative: 'lib/libssl.3.dylib'});
+    });
+
+    it('returns null for references outside a Homebrew prefix', () => {
+        expect(parseBrewRef('/usr/lib/libSystem.B.dylib')).toBeNull();
+        expect(parseBrewRef('/usr/local/lib/rogue.dylib')).toBeNull();
+        expect(parseBrewRef('@executable_path/../lib/libQt6Core.6.dylib')).toBeNull();
+    });
+});
+
+describe('isRuntimeLibrary', () => {
+    it('accepts shared libraries with and without version suffixes', () => {
+        expect(isRuntimeLibrary('/x/libFLAC.so')).toBe(true);
+        expect(isRuntimeLibrary('/x/libFLAC.so.1.4.3')).toBe(true);
+        expect(isRuntimeLibrary('/x/libFLAC++.dylib')).toBe(true);
+        expect(isRuntimeLibrary('/x/libQt6Core.6.11.1.dylib')).toBe(true);
+    });
+
+    it('rejects static archives and dev files that break patchelf/otool', () => {
+        expect(isRuntimeLibrary('/x/libFLAC++.a')).toBe(false);
+        expect(isRuntimeLibrary('/x/Qt6Core.prl')).toBe(false);
+        expect(isRuntimeLibrary('/x/libfoo.la')).toBe(false);
+        expect(isRuntimeLibrary('/x/charset.alias')).toBe(false);
     });
 });

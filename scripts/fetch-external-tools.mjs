@@ -12,11 +12,13 @@
  *                exists; runs under Windows 11 ARM emulation) + native MSYS2
  *                clang-aarch64 opus-tools.
  *   darwin/*     Official MKVToolNix DMG (Homebrew has no Intel-mac bottle)
- *                + Homebrew opus-tools bottles with their runtime closure,
- *                re-linked into a relocatable bin/lib layout and ad-hoc
- *                re-signed.
- *   linux/*      Homebrew bottles (x86_64/arm64), re-rpath'd to
- *                $ORIGIN/../lib via patchelf only when the verify run needs it.
+ *                + the Homebrew opus-tools bottle followed by only the dylibs
+ *                its binaries link (the formula-level closure would also pull
+ *                openssl@3, which has no Intel-mac bottle), re-linked into a
+ *                relocatable bin/lib layout and ad-hoc re-signed.
+ *   linux/*      Homebrew bottles (x86_64/arm64) for the whole formula
+ *                dependency closure, re-rpath'd to $ORIGIN/../lib via
+ *                patchelf only when the verify run needs it.
  *
  * Output layout (picked up by electron-builder `extraResources` and by
  * `resolveTool()` at runtime):
@@ -706,7 +708,7 @@ async function stageMacMkvToolNix(context) {
 }
 
 // ---------------------------------------------------------------------------
-// macOS / Linux: Homebrew bottles
+// Homebrew bottles (Linux: formula dependency closure, macOS: link closure)
 // ---------------------------------------------------------------------------
 
 async function brewFormula(name) {
@@ -815,6 +817,16 @@ async function downloadBottle(formula, tag, destDir) {
     return extractDir;
 }
 
+/**
+ * Runtime shared libraries only. Bottles also carry static archives and dev
+ * files (`.a`, `.prl`, `.la`, `charset.alias`, …) that are never runtime
+ * inputs — staging them breaks `patchelf --set-rpath` / `otool -L` and only
+ * bloats the package.
+ */
+function isRuntimeLibrary(file) {
+    return /\.(dylib|so(?:\.\d+)*)$/.test(file);
+}
+
 /** Runtime dependency closure via the formula API (runtime deps only). */
 async function brewClosure(rootNames) {
     const closure = new Map();
@@ -878,19 +890,122 @@ async function stageBrewTools(context, formulaNames = BREW_TOOLS.map((tool) => t
 
     // Runtime libraries from every formula in the closure — flattened into
     // lib/ (Homebrew only ever ships soname-versioned files at lib/ top level,
-    // so basenames do not collide across formulae).
+    // so basenames do not collide across formulae). Only shared objects are
+    // runtime inputs; see isRuntimeLibrary().
     let libCount = 0;
     for (const extractDir of extractDirs.values()) {
         const files = await walkFiles(extractDir);
         for (const file of files) {
             const relative = file.slice(extractDir.length);
-            if (/[\\/]lib[\\/][^\\/]+$/.test(relative)) {
+            if (/[\\/]lib[\\/][^\\/]+$/.test(relative) && isRuntimeLibrary(file)) {
                 await copyInto(file, context.libDir);
                 libCount += 1;
             }
         }
     }
     log(`staged ${libCount} library files from ${extractDirs.size} bottles`);
+}
+
+/**
+ * Map an absolute Homebrew library reference to its formula and the path
+ * inside that formula's bottle, e.g.
+ *   `/usr/local/Cellar/flac/1.5.0/lib/libFLAC.1.dylib`
+ *     → {formula: 'flac', relative: 'lib/libFLAC.1.dylib'}
+ *   `/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib`
+ *     → {formula: 'openssl@3', relative: 'lib/libssl.3.dylib'}
+ * Returns null for references outside a Homebrew prefix.
+ */
+function parseBrewRef(ref) {
+    const match = /^(?:\/opt\/homebrew|\/usr\/local)\/(Cellar|opt)\/([^/]+)\/(.*)$/.exec(ref);
+    if (match === null) {
+        return null;
+    }
+    const [, kind, formula, rest] = match;
+    if (kind === 'opt') {
+        return {formula, relative: rest};
+    }
+    // Cellar/<name>/<version>/<path> — drop the version segment.
+    const slash = rest.indexOf('/');
+    return slash === -1 ? null : {formula, relative: rest.slice(slash + 1)};
+}
+
+/**
+ * macOS staging by LINK closure: start from the root executables and follow
+ * every dylib reference into the formula that provides it, fetching only
+ * bottles whose libraries are actually linked. The formula-level dependency
+ * closure over-reaches — opusfile drags in openssl@3, which Homebrew no
+ * longer bottles for Intel Macs, although opusenc never links opusfile — and
+ * everything fetched here is provably needed, so a missing bottle tag stays
+ * a hard failure.
+ */
+async function stageBrewLinkedTools(context, formulaNames) {
+    const stagingRoot = path.join(context.tmpDir, 'bottles');
+    await fs.mkdir(stagingRoot, {recursive: true});
+
+    const bottles = new Map(); // formula name → extract dir
+    const fetchBottle = async (name) => {
+        const existing = bottles.get(name);
+        if (existing !== undefined) {
+            return existing;
+        }
+        const formula = await brewFormula(name);
+        if (formulaNames.includes(name)) {
+            assertPinned(formula, name === 'mkvtoolnix' ? MKVTOOLNIX_VERSION : OPUS_TOOLS_PIN);
+        }
+        const tag = pickBottleTag(formula);
+        log(`downloading ${name} bottle (${tag})`);
+        const extractDir = await downloadBottle(formula, tag, stagingRoot);
+        bottles.set(name, extractDir);
+        return extractDir;
+    };
+
+    // Root executables (version-pinned via formulaNames).
+    const queue = [];
+    for (const tool of BREW_TOOLS) {
+        if (!formulaNames.includes(tool.formula)) {
+            continue;
+        }
+        const extractDir = await fetchBottle(tool.formula);
+        const files = await walkFiles(extractDir);
+        for (const executable of tool.executables) {
+            const found = files.find((file) => file.endsWith(`${path.sep}bin${path.sep}${executable}`));
+            if (found === undefined) {
+                fail(`${executable} not found in the ${tool.formula} bottle`);
+            }
+            const dest = await copyInto(found, context.binDir);
+            context.tools.push({name: executable, file: dest, exeArch: context.arch});
+            queue.push(found);
+        }
+    }
+
+    // Follow dylib references: stage exactly the linked files, transitively.
+    const stagedSources = new Set();
+    let libCount = 0;
+    while (queue.length > 0) {
+        const file = queue.shift();
+        for (const ref of machoDependencies(file)) {
+            if (isSystemRef(ref)) {
+                continue;
+            }
+            const parsed = parseBrewRef(ref);
+            if (parsed === null) {
+                fail(`Cannot map dependency "${ref}" of ${file} to a Homebrew formula`);
+            }
+            const extractDir = await fetchBottle(parsed.formula);
+            const source = path.join(extractDir, parsed.relative);
+            if (!existsSync(source)) {
+                fail(`${ref} (from ${file}) not found in the ${parsed.formula} bottle`);
+            }
+            if (stagedSources.has(source)) {
+                continue;
+            }
+            stagedSources.add(source);
+            await copyInto(source, context.libDir);
+            queue.push(source);
+            libCount += 1;
+        }
+    }
+    log(`staged ${libCount} linked libraries from ${bottles.size} bottles`);
 }
 
 // ---------------------------------------------------------------------------
@@ -1092,9 +1207,10 @@ async function main() {
             await fs.mkdir(context.libDir, {recursive: true});
             if (platform === 'darwin') {
                 // mkvtoolnix ships via the official DMG on both Mac arches
-                // (Homebrew has no Intel-mac bottle); opusenc stays on bottles.
+                // (Homebrew has no Intel-mac bottle); opusenc comes from its
+                // bottle plus the dylibs it actually links.
                 await stageMacMkvToolNix(context);
-                await stageBrewTools(context, ['opus-tools']);
+                await stageBrewLinkedTools(context, ['opus-tools']);
                 await rewriteMachoDependencies(context);
             } else {
                 await stageBrewTools(context);
@@ -1142,8 +1258,10 @@ if (invokedDirectly) {
 
 export {
     main as fetchExternalTools,
+    isRuntimeLibrary,
     macosDmgName,
     macosDmgUrl,
+    parseBrewRef,
     pickBottleTag,
     repositoryFromBottleUrl,
     tarExecutable,
