@@ -736,10 +736,14 @@ export class EpisodeMuxer extends EventEmitter implements AsyncDisposable {
                     if (packet.pts !== AV_NOPTS_VALUE && packet.pts < 0n) packet.pts = 0n;
                 }
 
-                output.writePacketSync(packet, ctx.outputIndex);
-                packetsSinceYield++;
-
+                // Record before freeing: recordPacket needs packet.dts/pts.
                 tracker.recordPacket(writeKey, packet);
+                try {
+                    output.writePacketSync(packet, ctx.outputIndex);
+                } finally {
+                    packet.free();
+                }
+                packetsSinceYield++;
 
                 await refillBucketsForReader(bucket);
 
