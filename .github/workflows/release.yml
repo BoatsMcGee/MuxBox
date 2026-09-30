@@ -2,8 +2,8 @@
 # (nightly.yml does the latter — a push with the default GITHUB_TOKEN never
 # triggers other workflows, so the nightly job chain must be explicit).
 #
-# Version → channel mapping (electron-builder derives the channel file from
-# the version's prerelease component):
+# Version → channel mapping (the channel is passed explicitly to
+# electron-builder via VITE_DISTRIBUTION_CHANNEL → publish.channel):
 #   1.2.3              → latest.yml   (stable release)
 #   1.2.3-beta.1       → beta.yml     (marked --prerelease)
 #   1.2.3-nightly.<ts> → nightly.yml  (marked --prerelease)
@@ -115,15 +115,39 @@ jobs:
       - name: Merge multi-arch update metadata
         run: node scripts/merge-update-files.mjs dist-parts dist
 
-      - name: Verify expected channel file exists
+      # electron-builder names the update metadata per platform: Windows gets no
+      # suffix, macOS gets `-mac`, and Linux gets `-linux` (plus an arch suffix
+      # for non-x64 builds). All three must be present and must declare the
+      # version we asked for, otherwise clients on that channel cannot discover
+      # updates — the app fetches `<channel>.yml` from the release, so a
+      # mis-named or stale file is a silent auto-update failure.
+      - name: Verify expected channel files
         env:
           CHANNEL: ${{ needs.prepare.outputs.distribution-channel }}
+          EXPECTED_VERSION: ${{ needs.prepare.outputs.app-version }}
         run: |
-          if [ ! -f "dist/${CHANNEL}.yml" ]; then
-            echo "::error::dist/${CHANNEL}.yml missing — electron-builder channel detection regressed"
+          set -euo pipefail
+          status=0
+          for name in "${CHANNEL}.yml" "${CHANNEL}-mac.yml" "${CHANNEL}-linux.yml"; do
+            file="dist/${name}"
+            if [ ! -f "$file" ]; then
+              echo "::error::${file} missing — electron-builder publish.channel regressed"
+              status=1
+              continue
+            fi
+            version=$(sed -n 's/^version:[[:space:]]*//p' "$file" | head -n 1 | tr -d "'\"")
+            if [ "$version" != "$EXPECTED_VERSION" ]; then
+              echo "::error::${file} declares version '${version}', expected '${EXPECTED_VERSION}'"
+              status=1
+            fi
+          done
+          if [ "$status" -ne 0 ]; then
+            echo "::group::dist contents"
             ls -la dist
+            echo "::endgroup::"
             exit 1
           fi
+          echo "verified channel ${CHANNEL} at ${EXPECTED_VERSION}"
 
       - name: Generate SHA256SUMS.txt
         run: |

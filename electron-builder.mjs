@@ -16,6 +16,21 @@ export default /** @type import('electron-builder').Configuration */
         provider: 'github',
         owner: 'BoatsMcGee',
         repo: 'MuxBox',
+        // The update channel must be set explicitly. electron-builder only
+        // infers it from the version's prerelease component for the `generic`
+        // provider — for `github` it is always `latest`
+        // (see `detectUpdateChannel` in app-builder-lib/scheme.json), so a
+        // `1.2.3-nightly.<ts>` version would otherwise emit `latest*.yml`.
+        //
+        // This must stay in sync with `updater.channel` in
+        // packages/main/src/modules/AutoUpdater.ts, which reads the same
+        // variable: electron-updater fetches `<channel>.yml` from the release,
+        // so a mismatch silently disables auto-update for that channel.
+        //
+        // Note that `generateUpdatesFilesForAllChannels` above is inert for the
+        // `github` provider — it does not emit a `latest.yml` alongside a
+        // prerelease channel file.
+        channel: process.env.VITE_DISTRIBUTION_CHANNEL || 'latest',
     },
     // Bundled CLI tools fetched by scripts/fetch-external-tools.mjs into
     // buildResources/bin/<platform>-<arch>. The runtime resolver

@@ -112,7 +112,9 @@ sudo rpm -i MuxBox-<version>-linux-x64.rpm            # Fedora/RHEL
   executable and replace the old one.
 - **Channels:** stable releases are plain `v*` tags; betas carry a `-beta.N`
   suffix and nightlies a `-nightly.<timestamp>` suffix. The app follows the
-  channel it was installed from.
+  channel it was installed from: each build bakes in its channel and looks for
+  the matching `latest.yml`, `beta.yml`, or `nightly.yml` on its release, so
+  beta and nightly installs are never offered stable builds and vice versa.
 
 ## Uninstalling
 
