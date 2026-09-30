@@ -523,7 +523,10 @@ export const useEpisodeQueueStore = defineStore('episodeQueue', () => {
 
         const cpuCount = getCpuCount();
         const settings = await getSettings();
-        const concurrency = settings.muxingConcurrency ?? Math.max(1, cpuCount - 1);
+        const configured = settings.muxingConcurrency;
+        const concurrency = configured !== undefined && configured > 0
+            ? Math.min(configured, cpuCount)
+            : Math.max(1, cpuCount - 1);
 
         // Prepare per-episode jobs: serialize + merge queue overrides BEFORE IPC
         // so the worker receives a fully-resolved episode.

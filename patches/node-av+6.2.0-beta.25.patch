@@ -1,0 +1,82 @@
+diff --git a/node_modules/node-av/dist/api/muxer.js b/node_modules/node-av/dist/api/muxer.js
+index 8645877..ca0b597 100644
+--- a/node_modules/node-av/dist/api/muxer.js
++++ b/node_modules/node-av/dist/api/muxer.js
+@@ -844,7 +844,15 @@ export class Muxer {
+             this.applyStartTimeOffset(clonedPacket, streamInfo);
+         }
+         // Check if any streams are still uninitialized or header is being written
+-        const uninitialized = Array.from(this._streams.values()).some((s) => !s.initialized);
++        // [muxbox patch] Replaced `Array.from(this._streams.values()).some(...)`
++        // with a plain loop (async twin of the writePacketSync patch).
++        let uninitialized = false;
++        for (const s of this._streams.values()) {
++            if (!s.initialized) {
++                uninitialized = true;
++                break;
++            }
++        }
+         // PHASE 1: Before header write - ALWAYS buffer in PreMuxQueue
+         // PreMuxQueue is used during initialization phase ONLY (regardless of SyncQueue presence)
+         // After header write, PreMuxQueue is flushed in DTS-sorted order
+@@ -1148,7 +1156,16 @@ export class Muxer {
+             this.applyStartTimeOffset(clonedPacket, streamInfo);
+         }
+         // Check if any streams are still uninitialized
+-        const uninitialized = Array.from(this._streams.values()).some((s) => !s.initialized);
++        // [muxbox patch] Replaced `Array.from(this._streams.values()).some(...)`
++        // with a plain loop; Array.from allocated a fresh array of every
++        // stream info on EVERY packet to evaluate a boolean.
++        let uninitialized = false;
++        for (const s of this._streams.values()) {
++            if (!s.initialized) {
++                uninitialized = true;
++                break;
++            }
++        }
+         // PHASE 1: Before header write - ALWAYS buffer in PreMuxQueue
+         // PreMuxQueue is used during initialization phase ONLY (regardless of SyncQueue presence)
+         // After header write, PreMuxQueue is flushed in DTS-sorted order
+diff --git a/node_modules/node-av/dist/lib/format-context.js b/node_modules/node-av/dist/lib/format-context.js
+index 8a506e9..278aff0 100644
+--- a/node_modules/node-av/dist/lib/format-context.js
++++ b/node_modules/node-av/dist/lib/format-context.js
+@@ -56,6 +56,8 @@ import { Stream } from './stream.js';
+  */
+ export class FormatContext extends OptionMember {
+     _ioContext = null;
++    /** [muxbox patch] Memoised `streams`; invalidated by newStream(). */
++    _streamsCache = null;
+     constructor() {
+         super(new bindings.FormatContext());
+     }
+@@ -253,11 +255,17 @@ export class FormatContext extends OptionMember {
+      * Direct mapping to AVFormatContext->streams.
+      */
+     get streams() {
++        const cached = this._streamsCache;
++        if (cached !== null) {
++            return cached;
++        }
+         const nativeStreams = this.native.streams;
+         if (!nativeStreams) {
+-            return [];
++            this._streamsCache = [];
++            return this._streamsCache;
+         }
+-        return nativeStreams.map((nativeStream) => new Stream(nativeStream));
++        this._streamsCache = nativeStreams.map((nativeStream) => new Stream(nativeStream));
++        return this._streamsCache;
+     }
+     /**
+      * Strictness level for standards compliance.
+@@ -1205,6 +1213,9 @@ export class FormatContext extends OptionMember {
+      */
+     newStream(c = null) {
+         const nativeStream = this.native.newStream(c?.getNative() ?? null);
++        // [muxbox patch] The stream list just grew; drop the memoised array so the
++        // next `streams` read reflects the appended stream.
++        this._streamsCache = null;
+         return new Stream(nativeStream);
+     }
+     /**

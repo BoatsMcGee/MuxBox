@@ -25,7 +25,7 @@
         "@app/tmdb": "*",
         "@app/utils": "*",
         "@ctrl/video-filename-parser": "^5.4.1",
-        "node-av": "^6.2.0-beta.11",
+        "node-av": "^6.2.0-beta.25",
         "sanitize-filename": "^1.6.4"
     }
 }

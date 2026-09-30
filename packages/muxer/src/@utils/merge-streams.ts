@@ -17,12 +17,24 @@ export interface WriteContext {
     delaySec: number;
     timeBaseNum: number;
     timeBaseDen: number;
+    /**
+     * `delaySec` pre-converted to stream time-base units. Loop-invariant, so it
+     * is computed once when the context is built rather than allocating a BigInt
+     * per packet.
+     */
+    delayInStreamUnits: bigint;
 }
 
 export interface HeapEntry {
     sortDtsUs: number;
     packet: Packet;
     bucket: SyncPacketBucket;
+}
+
+/** Plain time-base pair, pre-extracted to avoid per-packet Rational allocation. */
+export interface RationalLike {
+    readonly num: number;
+    readonly den: number;
 }
 
 // #endregion Types
@@ -71,6 +83,13 @@ export class SyncPacketBucket {
     private readonly writeContextMap: ReadonlyMap<string, WriteContext>;
     private buffer: Packet[] = [];
     public exhausted = false;
+    /**
+     * Write keys per stream index, memoized. `buildWriteKey` scans the full
+     * absolute source path for ':preprocess:' and concatenates a fresh ~70-char
+     * string on every call; this runs once per packet. The stream set is fixed
+     * for a bucket's lifetime, so the mapping is stable.
+     */
+    private readonly keyCache = new Map<number, string | null>();
 
     constructor(demuxerMapKey: string, writeContextMap: ReadonlyMap<string, WriteContext>) {
         this.demuxerMapKey = demuxerMapKey;
@@ -81,11 +100,25 @@ export class SyncPacketBucket {
         this.buffer.push(packet);
     }
 
+    /** Memoized write key for a stream index; null when unmapped. */
+    private writeKeyFor(streamIndex: number): string | null {
+        const cached = this.keyCache.get(streamIndex);
+        if (cached !== undefined) return cached;
+        const key = buildWriteKey(this.demuxerMapKey, streamIndex);
+        const result = this.writeContextMap.has(key) ? key : null;
+        this.keyCache.set(streamIndex, result);
+        return result;
+    }
+
+    /** Whether this bucket maps the given stream index to a write context. */
+    accepts(streamIndex: number): boolean {
+        return this.writeKeyFor(streamIndex) !== null;
+    }
+
     pull(): HeapEntry | null {
         while (this.buffer.length > 0) {
             const pkt = this.buffer.shift()!;
-            const writeKey = buildWriteKey(this.demuxerMapKey, pkt.streamIndex);
-            if (this.writeContextMap.has(writeKey)) {
+            if (this.writeKeyFor(pkt.streamIndex) !== null) {
                 return { sortDtsUs: computeSortDtsUs(pkt), packet: pkt, bucket: this };
             }
             pkt.free();
@@ -125,18 +158,39 @@ export class DemuxPacketReader {
     /** Scratch buffer for Atomics.wait() EAGAIN retries (mirrors FFmpeg's av_usleep). */
     private readonly syncSleepSignal = new Int32Array(new SharedArrayBuffer(4));
 
-    private readonly writeContextMap: ReadonlyMap<string, WriteContext>;
+    /**
+     * Streams snapshot, taken once. `Demuxer.getStream()` resolves through the
+     * `formatContext.streams` getter, which does
+     * `nativeStreams.map(ns => new Stream(ns))` — allocating a fresh wrapper for
+     * EVERY stream in the file on EVERY access. At 20 streams that is 20 NAPI
+     * object allocations per packet just to look one up. The stream list is fixed
+     * for a demuxer's lifetime, so snapshot it here and index directly.
+     */
+    private readonly streams: readonly Stream[];
+    /**
+     * Per-stream time base num/den, pre-resolved. `packet.timeBase` and
+     * `stream.timeBase` are both NAPI round-trips that allocate a `Rational` per
+     * access; reading them once per stream removes 2+ allocations per packet.
+     */
+    private readonly streamTimeBases: readonly RationalLike[];
 
-    constructor(
-        demuxer: Demuxer,
-        useAsync: boolean,
-        writeContextMap: ReadonlyMap<string, WriteContext>,
-    ) {
-        this.writeContextMap = writeContextMap;
+    constructor(demuxer: Demuxer, useAsync: boolean) {
         this.isAsync = useAsync;
         this.demuxer = demuxer;
         this.reusedPacket = new PacketImpl();
         this.reusedPacket.alloc();
+
+        this.streams = demuxer.getFormatContext().streams ?? [];
+        this.streamTimeBases = this.streams.map(s => {
+            const tb = s.timeBase;
+            return { num: tb.num, den: tb.den };
+        });
+    }
+
+    /** Look up a stream without going through the allocating getter. */
+    private streamFor(index: number): Stream | undefined {
+        const s = this.streams[index];
+        return s !== undefined ? s : undefined;
     }
 
     get exhausted(): boolean {
@@ -162,12 +216,18 @@ export class DemuxPacketReader {
      */
     private processTimestamps(packet: PacketImpl, stream: Stream | undefined): void {
         if (!stream) return;
-        packet.timeBase = stream.timeBase;
         const demuxer = this.demuxer as unknown as {
             ptsWrapAroundCorrection(p: PacketImpl, s: Stream): void;
             timestampDiscontinuityProcess(p: PacketImpl, s: Stream): void;
             dtsPredict(p: PacketImpl, s: Stream): void;
         };
+        // Set the time base from the pre-resolved copy rather than
+        // `stream.timeBase`, which is a NAPI round-trip plus a `Rational`
+        // allocation on every read.
+        const tb = this.streamTimeBases[packet.streamIndex];
+        if (tb !== undefined) {
+            packet.timeBase = tb;
+        }
         demuxer.ptsWrapAroundCorrection(packet, stream);
         demuxer.timestampDiscontinuityProcess(packet, stream);
         demuxer.dtsPredict(packet, stream);
@@ -208,11 +268,11 @@ export class DemuxPacketReader {
                 return;
             }
 
-            const stream = this.demuxer.getStream(this.reusedPacket.streamIndex);
+            const stream = this.streamFor(this.reusedPacket.streamIndex);
             this.processTimestamps(this.reusedPacket, stream);
 
             const owned = this.refOwnedPacket();
-            dispatchToBucket(owned, buckets, targetPerBucket, this.writeContextMap);
+            dispatchToBucket(owned, buckets, targetPerBucket);
             this.reusedPacket.unref();
         }
     }
@@ -236,11 +296,11 @@ export class DemuxPacketReader {
                 return;
             }
 
-            const stream = this.demuxer.getStream(this.reusedPacket.streamIndex);
+            const stream = this.streamFor(this.reusedPacket.streamIndex);
             this.processTimestamps(this.reusedPacket, stream);
 
             const owned = this.refOwnedPacket();
-            dispatchToBucket(owned, buckets, targetPerBucket, this.writeContextMap);
+            dispatchToBucket(owned, buckets, targetPerBucket);
             this.reusedPacket.unref();
         }
     }
@@ -270,16 +330,19 @@ function allBucketsFilled(buckets: SyncPacketBucket[], targetPerBucket: number):
 /**
  * Dispatch a packet to the first bucket whose demuxerMapKey + streamIndex
  * is registered in writeContextMap. If no bucket accepts it, free the packet.
+ *
+ * `accepts` is memoized per bucket/stream index by the bucket itself, so this
+ * per-packet, per-bucket scan does no string building or Map lookups with
+ * freshly concatenated keys after the first packet for a given index.
  */
 function dispatchToBucket(
     packet: Packet,
     buckets: SyncPacketBucket[],
     targetPerBucket: number,
-    writeContextMap: ReadonlyMap<string, WriteContext>,
 ): void {
+    const streamIndex = packet.streamIndex;
     for (const b of buckets) {
-        const writeKey = buildWriteKey(b.demuxerMapKey, packet.streamIndex);
-        if (writeContextMap.has(writeKey)) {
+        if (b.accepts(streamIndex)) {
             if (b.size < targetPerBucket) {
                 b.push(packet);
             } else {

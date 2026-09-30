@@ -34,8 +34,9 @@
     "lint": "eslint .",
     "typecheck": "npm run typecheck -ws --if-present",
     "fetch:tools": "node scripts/fetch-external-tools.mjs",
+    "postinstall": "patch-package",
     "clean": "rimraf dist packages/main/dist packages/preload/dist packages/renderer/dist",
-    "deepclean": "npm run clean && rimraf --glob node_modules packages/*/node_modules"
+    "deepclean": "npm run clean && rimraf --glob node_modules patches packages/*/node_modules"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -50,6 +51,7 @@
     "glob": "13.0.6",
     "globals": "^17.6.0",
     "jsdom": "^29.1.1",
+    "patch-package": "^8.0.1",
     "playwright": "^1.58.2",
     "rimraf": "^6.0.1",
     "typescript-eslint": "^8.59.4",

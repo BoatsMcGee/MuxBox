@@ -25,5 +25,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
     windowY: undefined,
     windowIsMaximized: false,
     multiplexerMethod: { keepNegativePackets: false, clipTimestamps: false },
-    muxingConcurrency: 4,
+    muxingConcurrency: undefined,
 };

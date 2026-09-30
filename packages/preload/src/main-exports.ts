@@ -28,7 +28,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     windowY: undefined,
     windowIsMaximized: false,
     multiplexerMethod: { keepNegativePackets: false, clipTimestamps: false },
-    muxingConcurrency: 0,
+    muxingConcurrency: undefined,
 };
 
 let _userDataPath: string | null = null;

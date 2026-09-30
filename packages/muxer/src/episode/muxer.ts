@@ -521,11 +521,20 @@ export class EpisodeMuxer extends EventEmitter implements AsyncDisposable {
             const isPreprocessed = demuxerMapKey.includes(':preprocess:');
             const stream = demuxer.getStream(isPreprocessed ? 0 : originalIndex);
             if (!stream) continue;
+            const timeBaseNum = stream.timeBase.num;
+            const timeBaseDen = stream.timeBase.den;
+            const delaySec = streamDelayMap.get(streamKey) ?? 0;
             writeContextMap.set(streamKey, {
                 outputIndex: outputIndexVal,
-                delaySec: streamDelayMap.get(streamKey) ?? 0,
-                timeBaseNum: stream.timeBase.num,
-                timeBaseDen: stream.timeBase.den,
+                delaySec,
+                timeBaseNum,
+                timeBaseDen,
+                // Pre-resolve the delay in stream time-base units. This is
+                // loop-invariant, so computing it per packet allocated a BigInt
+                // for every packet on delay-bearing streams.
+                delayInStreamUnits: delaySec === 0
+                    ? 0n
+                    : BigInt(Math.round(delaySec / (timeBaseNum / timeBaseDen))),
             });
         }
 
@@ -598,7 +607,7 @@ export class EpisodeMuxer extends EventEmitter implements AsyncDisposable {
             }
 
             const buckets = keys.map(k => new SyncPacketBucket(k, writeContextMap));
-            const reader = new DemuxPacketReader(demuxer, isPreprocessedDemuxer, writeContextMap);
+            const reader = new DemuxPacketReader(demuxer, isPreprocessedDemuxer);
             readers.push({ reader, buckets });
         }
 
@@ -717,8 +726,8 @@ export class EpisodeMuxer extends EventEmitter implements AsyncDisposable {
                     continue;
                 }
 
-                if (ctx.delaySec !== 0) {
-                    const delayInStreamUnits = BigInt(Math.round(ctx.delaySec / (ctx.timeBaseNum / ctx.timeBaseDen)));
+                if (ctx.delayInStreamUnits !== 0n) {
+                    const delayInStreamUnits = ctx.delayInStreamUnits;
                     if (packet.dts !== AV_NOPTS_VALUE) packet.dts = packet.dts + delayInStreamUnits;
                     if (packet.pts !== AV_NOPTS_VALUE) packet.pts = packet.pts + delayInStreamUnits;
                 }
