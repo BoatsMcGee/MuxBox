@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Fetch and stage the external CLI tools that get bundled into MuxBox builds.
  *
@@ -224,9 +223,27 @@ function runOk(cmd, args, options = {}) {
     return result;
 }
 
+/**
+ * On Windows always use the bsdtar from System32. In CI the fetch step runs
+ * under Git Bash, where `tar` resolves to GNU tar — which parses `C:\path`
+ * as a remote `host:path` (`tar: Cannot connect to C: resolve failed`) and
+ * cannot read 7z at all. System32 bsdtar handles drive-letter paths and
+ * 7z/zstd/gz natively (locally verified against every archive this script
+ * downloads).
+ */
+function tarExecutable() {
+    if (process.platform === 'win32') {
+        const systemTar = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe');
+        if (existsSync(systemTar)) {
+            return systemTar;
+        }
+    }
+    return 'tar';
+}
+
 async function extractArchive(archive, destDir) {
     await fs.mkdir(destDir, { recursive: true });
-    const result = run('tar', ['-xf', archive, '-C', destDir]);
+    const result = run(tarExecutable(), ['-xf', archive, '-C', destDir]);
     if (result.error || result.status !== 0) {
         fail(
             `Failed to extract ${archive} (status ${result.status}): `
@@ -629,15 +646,35 @@ function pickBottleTag(formula) {
     return fallback;
 }
 
+/**
+ * Registry repository path of a bottle blob URL, e.g.
+ * `https://ghcr.io/v2/homebrew/core/icu4c/78/blobs/sha256:…` →
+ * `homebrew/core/icu4c/78`. Versioned formulae (`icu4c@78`) publish under a
+ * `/`-separated path, NOT their formula name — a scope built from
+ * `homebrew/core/icu4c@78` is rejected by ghcr.io with HTTP 400.
+ * Returns null for URLs we don't recognize.
+ */
+function repositoryFromBottleUrl(fileUrl) {
+    let pathname;
+    try {
+        pathname = new URL(fileUrl).pathname;
+    } catch {
+        return null;
+    }
+    const match = /^\/v2\/(.+)\/blobs\/sha256:[0-9a-f]+$/.exec(pathname);
+    return match === null ? null : match[1];
+}
+
 async function downloadBottle(formula, tag, destDir) {
     const file = formula.bottle.stable.files[tag];
-    const scope = `repository:homebrew/core/${formula.name}:pull`;
+    const repository = repositoryFromBottleUrl(file.url) ?? `homebrew/core/${formula.name}`;
+    const scope = `repository:${repository}:pull`;
     const tokenResponse = await fetch(
         `https://ghcr.io/token?service=ghcr.io&scope=${encodeURIComponent(scope)}`,
         {headers: {'User-Agent': USER_AGENT}},
     );
     if (!tokenResponse.ok) {
-        fail(`ghcr.io token request failed: HTTP ${tokenResponse.status}`);
+        fail(`ghcr.io token request failed: HTTP ${tokenResponse.status} (scope: ${scope})`);
     }
     const { token } = JSON.parse(await tokenResponse.text());
 
@@ -897,6 +934,10 @@ async function main() {
     let succeeded = false;
     try {
         log(`staging tools for ${archDir} (host: ${platform}/${process.arch})`);
+        // Restage from scratch: leftovers from a previous run (or files from a
+        // package no longer in the closure) must never conflict with the
+        // current download or ship stale binaries via extraResources.
+        await fs.rm(context.outDir, {recursive: true, force: true});
         await fs.mkdir(context.binDir, {recursive: true});
         await stageLicenses(context.licenseDir);
 
@@ -950,4 +991,4 @@ if (invokedDirectly) {
     });
 }
 
-export {main as fetchExternalTools};
+export {main as fetchExternalTools, repositoryFromBottleUrl, tarExecutable};
