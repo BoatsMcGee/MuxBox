@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue';
 import { getSettings, saveSettings } from '@app/preload';
 import type { Multiplexer } from '@app/preload';
 import { type ThemeMode } from '@app/settings';
+import { syncMonacoTheme } from '@/lib/monaco-theme';
 
 function applyTheme(theme: ThemeMode): void {
     const root = document.documentElement;
@@ -18,6 +19,10 @@ function applyTheme(theme: ThemeMode): void {
             root.classList.remove('dark');
         }
     }
+    // The .dark class is the single source of truth, so push the matching
+    // Monaco theme from here too. Every caller (load, setTheme, and the
+    // prefers-color-scheme listener for 'auto') goes through this function.
+    syncMonacoTheme();
 }
 
 export const useSettingsStore = defineStore('settings', () => {

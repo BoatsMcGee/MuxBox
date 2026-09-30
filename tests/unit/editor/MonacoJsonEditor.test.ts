@@ -60,6 +60,7 @@ vi.mock('monaco-editor', () => ({
             markerListener = l;
             return { dispose: vi.fn() };
         }),
+        setTheme: vi.fn(),
     },
     Range: class {},
     languages: {
@@ -355,6 +356,37 @@ describe('MonacoJsonEditor', () => {
         });
     });
 
+    describe('theme', () => {
+        it('does not hardcode a dark theme at any editor creation site', async () => {
+            const w = mount(MonacoJsonEditor, { props: { modelValue: {} } });
+            await waitForMount();
+
+            const { create, createDiffEditor } = await import('monaco-editor').then(m => m.editor);
+            expect(create).toHaveBeenCalled();
+            for (const call of vi.mocked(create).mock.calls) {
+                expect(call[1]?.theme).toBeUndefined();
+            }
+            for (const call of vi.mocked(createDiffEditor).mock.calls) {
+                expect(call[1]?.theme).toBeUndefined();
+            }
+
+            w.unmount();
+        });
+
+        it('applies the app theme via the global setter on mount', async () => {
+            document.documentElement.classList.add('dark');
+            try {
+                mount(MonacoJsonEditor, { props: { modelValue: {} } });
+                await waitForMount();
+
+                const { setTheme } = await import('monaco-editor').then(m => m.editor);
+                expect(setTheme).toHaveBeenCalledWith('vs-dark');
+            } finally {
+                document.documentElement.classList.remove('dark');
+            }
+        });
+    });
+
     describe('cleanup', () => {
         it('disposes editor on unmount', async () => {
             const w = mount(MonacoJsonEditor, {
@@ -366,4 +398,5 @@ describe('MonacoJsonEditor', () => {
             expect(currentEditor.dispose).toHaveBeenCalled();
         });
     });
+
 });

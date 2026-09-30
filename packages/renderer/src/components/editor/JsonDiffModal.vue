@@ -2,6 +2,7 @@
 import { ref, onMounted, shallowRef, onUnmounted, nextTick } from 'vue';
 import { DialogRoot, DialogContent, DialogTitle, DialogClose } from 'reka-ui';
 import { X } from '@lucide/vue';
+import { registerMonacoThemeSetter, unregisterMonacoThemeSetter } from '@/lib/monaco-theme';
 
 interface Props {
     open: boolean;
@@ -24,11 +25,14 @@ onMounted(async () => {
     if (!diffContainer.value) return;
 
     const monaco = await import('monaco-editor');
+
+    // setTheme is global, so this keeps the diff editor in sync with the app theme.
+    registerMonacoThemeSetter(monaco.editor.setTheme);
+
     const originalModel = monaco.editor.createModel(props.original, 'json');
     const modifiedModel = monaco.editor.createModel(props.modified, 'json');
 
     const editor = monaco.editor.createDiffEditor(diffContainer.value, {
-        theme: 'vs-dark',
         minimap: { enabled: false },
         automaticLayout: true,
         renderSideBySide: true,
@@ -40,6 +44,8 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+    unregisterMonacoThemeSetter();
+
     if (diffEditor.value) {
         const de = diffEditor.value as {
             getModel: () => { original: { dispose: () => void }; modified: { dispose: () => void } } | null;

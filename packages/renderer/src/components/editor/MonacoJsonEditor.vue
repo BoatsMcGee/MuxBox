@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { cn } from '@/lib/utils';
+import { registerMonacoThemeSetter, unregisterMonacoThemeSetter } from '@/lib/monaco-theme';
 import { ref, computed, onMounted, onUnmounted, watch, shallowRef, nextTick } from 'vue';
 import type { editor as monacoEditor, Range as MonacoRange } from 'monaco-editor';
 import { Check, ChevronDown, Copy, EyeOff, Eye, Highlighter, WrapText } from '@lucide/vue';
@@ -90,6 +91,7 @@ interface MonacoModule {
         createDiffEditor: (dom: HTMLElement, options?: monacoEditor.IDiffEditorConstructionOptions) => monacoEditor.IStandaloneDiffEditor;
         getModelMarkers: (filter: { resource?: monacoEditor.ITextModel['uri']; owner?: string; severity?: number }) => { startLineNumber: number; startColumn: number; message: string; severity: number }[];
         onDidChangeMarkers: (listener: (resources: monacoEditor.ITextModel['uri'][]) => void) => { dispose: () => void };
+        setTheme: (theme: string) => void;
     };
     Range: typeof MonacoRange;
     languages: {
@@ -452,7 +454,6 @@ async function createRegularEditor(initialValue: string, isInitialMount = false)
     const ed = monaco.editor.create(editorContainer.value, {
         value: initialValue,
         language: 'json',
-        theme: 'vs-dark',
         minimap: { enabled: false },
         automaticLayout: true,
         tabSize: 4,
@@ -521,8 +522,6 @@ async function toggleDiffView(): Promise<void> {
             renderSideBySide: true,
             readOnly: true,
         });
-        // Theme must be applied to the outer editor, not the construction options
-        (diff as unknown as { updateOptions: (opts: Record<string, unknown>) => void }).updateOptions({ theme: 'vs-dark' });
         diff.setModel({ original: originalModel, modified: modifiedModel });
         diffEditor.value = diff;
         showDiff.value = true;
@@ -548,6 +547,10 @@ async function toggleDiffView(): Promise<void> {
 onMounted(async () => {
     const monaco = await import('monaco-editor');
     monacoRef.value = monaco as unknown as MonacoModule;
+
+    // setTheme is global, so this keeps every live editor (regular and diff)
+    // in sync with the app theme from here on.
+    registerMonacoThemeSetter(monaco.editor.setTheme);
 
     applySchema(monaco as unknown as MonacoModule, props.schema);
 
@@ -599,6 +602,7 @@ watch(
 onUnmounted(() => {
     if (settleTimer) clearTimeout(settleTimer);
     settleTimer = null;
+    unregisterMonacoThemeSetter();
     markerListenerDisposable?.dispose();
     markerListenerDisposable = null;
     // Dispose diff editor FIRST, then models
@@ -639,7 +643,6 @@ function exitDiff(): void {
     const ed = monaco.editor.create(editorContainer.value, {
         value: currentValue,
         language: 'json',
-        theme: 'vs-dark',
         minimap: { enabled: false },
         automaticLayout: true,
         tabSize: 4,
