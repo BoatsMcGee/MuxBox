@@ -11,9 +11,12 @@ import {capture} from '../helpers/screenshot';
 import {
     expandQueueEpisode,
     expandQueueTrack,
+    expectNoPageOverflow,
+    expectNoPageScrollbar,
     flushProjectSave,
     hoverTooltip,
     openHowProject,
+    openNewProject,
     openProject,
     queueItem,
     setQueueSection,
@@ -36,6 +39,20 @@ t.describe('Project', () => {
         const addSource = page.locator('div.border-2.border-dashed').filter({hasText: 'Add Source'});
         await expect(addSource.first()).toBeVisible();
         await capture(page, 'project/empty');
+    });
+
+    t('project/layout-no-scrollbar', async ({page}) => {
+        // Regression guard: the page used to reserve height with a hand-tuned
+        // `calc(100vh - 5rem)` grid inside an already-full-height parent, which
+        // summed past the viewport and left a scrollbar on every page.
+        await openNewProject(page);
+        await expectNoPageOverflow(page);
+        await expectNoPageScrollbar(page);
+
+        // A populated project is taller but must still fit the viewport.
+        await openHowProject(page);
+        await expectNoPageOverflow(page);
+        await expectNoPageScrollbar(page);
     });
 
     t('project/output-directory', async ({page, app}) => {

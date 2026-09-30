@@ -14,6 +14,8 @@ import {
     ensureConfigExpanded,
     ensureFileExpanded,
     expandPreviewTrack,
+    expectNoPageOverflow,
+    expectNoPageScrollbar,
     fileRow,
     fillNumberField,
     flushProjectSave,
@@ -53,6 +55,11 @@ test.describe('Source', () => {
         await expect(page.getByRole('heading', {name: 'Add Source'})).toBeVisible();
         await waitForPreviewReady(page);
         await expect(page.locator('input[readonly]').first()).toHaveValue(VIDEO_DIR);
+        // Same layout regression as project/layout-no-scrollbar: the source
+        // editor sized its grid with `calc(100vh - 10rem)` inside `main`'s
+        // padding, which overshot the viewport and pinned a scrollbar.
+        await expectNoPageOverflow(page);
+        await expectNoPageScrollbar(page);
         await capture(page, 'source/add');
 
         // Back out without saving: the builder steps below run against the

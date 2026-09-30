@@ -331,7 +331,7 @@ onUnmounted(() => {
 
 <template>
     <DnDProvider>
-    <div class="flex flex-col min-h-screen">
+    <div class="flex flex-col h-screen">
         <header class="border-b px-4 py-2 flex items-center justify-between gap-3">
             <div class="flex items-center gap-3 flex-1 min-w-0">
                 <TooltipRoot v-if="queueStore.hasActiveProcessing" :delay-duration="200">
@@ -458,13 +458,16 @@ onUnmounted(() => {
             </div>
         </header>
 
-        <main class="flex-1 p-6">
+        <main class="flex-1 min-h-0 flex flex-col p-6">
             <div v-if="!project" class="flex items-center justify-center h-full">
                 <p class="text-muted-foreground">Loading project...</p>
             </div>
 
-            <div v-else class="max-w-7xl mx-auto">
-                <div class="grid grid-cols-1 xl:grid-cols-2 xl:grid-rows-[1fr] gap-6 xl:min-h-0" :class="{ 'xl:h-[calc(100vh-5rem)]': project }">
+            <div v-else class="max-w-7xl mx-auto xl:w-full xl:flex-1 xl:min-h-0 xl:flex xl:flex-col">
+                <!-- Below xl the page scrolls as one document; from xl up the two
+                     columns become independent scroll areas filling the space
+                     left under the header. -->
+                <div class="grid grid-cols-1 xl:grid-cols-2 xl:grid-rows-[1fr] gap-6 xl:flex-1 xl:min-h-0">
                     <!-- Left Column: Project Settings + Sources -->
                     <ScrollAreaRoot class="xl:overflow-hidden xl:flex xl:flex-col" type="auto" :style="{ height: '100%' }">
                         <ScrollAreaViewport class="xl:flex-1 xl:min-h-0">

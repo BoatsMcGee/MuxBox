@@ -849,7 +849,7 @@ function handlePerFileEpisodeOverride(file: string, val: number | null) {
 </script>
 
 <template>
-    <div class="flex flex-col min-h-screen">
+    <div class="flex flex-col h-screen">
         <header class="border-b px-4 py-2 flex items-center gap-3">
             <button class="text-sm text-muted-foreground hover:text-foreground shrink-0" @click="handleCancel">
                 ← Back
@@ -866,9 +866,12 @@ function handlePerFileEpisodeOverride(file: string, val: number | null) {
             </div>
         </header>
 
-        <main class="flex-1 p-6">
-            <div class="max-w-7xl mx-auto">
-                <div class="grid grid-cols-1 xl:grid-cols-2 xl:grid-rows-[1fr] gap-6 xl:min-h-0" :class="{ 'xl:h-[calc(100vh-10rem)]': directory }">
+        <main class="flex-1 min-h-0 flex flex-col p-6">
+            <div class="max-w-7xl mx-auto xl:w-full xl:flex-1 xl:min-h-0 xl:flex xl:flex-col">
+                <!-- Below xl the page scrolls as one document; from xl up the two
+                     columns become independent scroll areas filling the space
+                     left under the header. -->
+                <div class="grid grid-cols-1 xl:grid-cols-2 xl:grid-rows-[1fr] gap-6 xl:flex-1 xl:min-h-0">
 
                     <!-- Left Column: General Settings + Stream Configuration -->
                     <ScrollAreaRoot class="xl:overflow-hidden xl:flex xl:flex-col" type="auto" :style="{ height: '100%' }">

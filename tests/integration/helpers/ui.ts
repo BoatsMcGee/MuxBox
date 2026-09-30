@@ -299,4 +299,39 @@ export async function flushProjectSave(page: Page): Promise<void> {
     await page.waitForTimeout(900);
 }
 
+/**
+ * Assert the page-level scroll area has nothing to scroll.
+ *
+ * The root ScrollArea uses type="always", so its track is always in the DOM;
+ * App.vue v-ifs the *thumb* on measured overflow. Reka's own data-state cannot
+ * be used here — it stays "visible" for non-overflowing content.
+ */
+export async function expectNoPageScrollbar(page: Page): Promise<void> {
+    const scrollbar = page.locator('[data-scrollbarimpl]').first();
+    if ((await scrollbar.count()) > 0) {
+        // Track stays mounted; the thumb must be absent.
+        await expect(scrollbar.locator('[data-state]')).toHaveCount(0);
+    }
+}
+
+/**
+ * Assert the app-level scroll viewport does not overflow.
+ *
+ * Guards the layout regression directly: the root viewport is `h-screen`, so
+ * any scrollHeight above its clientHeight means the inner content is being
+ * sized against the full window height instead of the space below the header.
+ */
+export async function expectNoPageOverflow(page: Page): Promise<void> {
+    const overflow = await page.evaluate(() => {
+        const viewport = document.querySelector<HTMLElement>('[data-reka-scroll-area-viewport]');
+        if (!viewport) return {found: false, overflow: 0};
+        return {
+            found: true,
+            overflow: viewport.scrollHeight - viewport.clientHeight,
+        };
+    });
+    expect(overflow.found, 'root scroll area viewport not found').toBe(true);
+    expect(overflow.overflow, 'root scroll area overflows vertically').toBeLessThanOrEqual(0);
+}
+
 export {PROJECT_HOW_ID, PROJECT_NEW_ID};
