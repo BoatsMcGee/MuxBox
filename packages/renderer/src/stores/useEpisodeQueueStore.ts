@@ -110,6 +110,54 @@ function mergeQueueOverrides(episode: Episode, rawOverrides: Record<string, PerT
     return merged;
 }
 
+/**
+ * Minimal shape a queue row must satisfy to be counted in completion stats.
+ */
+export interface CountableEpisode {
+    id: string;
+    enabled: boolean;
+    status: string;
+}
+
+/** Completed / errored / total counts scoped to the episodes actually queued. */
+export interface QueueCompletionStats {
+    completed: number;
+    errors: number;
+    total: number;
+}
+
+/**
+ * Derive completion stats from the episodes currently in the queue.
+ *
+ * Counts are scoped to the supplied rows rather than the raw progress map:
+ * progress entries outlive the episodes they describe, so a project whose
+ * sources were edited after a run would otherwise report more completed
+ * episodes than the queue contains. Disabled rows and rows still probing
+ * their sources are excluded — they are not muxable, so they are not work.
+ *
+ * @param episodes Queue rows currently rendered.
+ * @param getStatus Status lookup for a row id, returning undefined when the
+ *   row has no progress entry yet.
+ */
+export function computeQueueCompletionStats(
+    episodes: readonly CountableEpisode[],
+    getStatus: (id: string) => ProcessingStatus | undefined,
+): QueueCompletionStats {
+    let completed = 0;
+    let errors = 0;
+    let total = 0;
+
+    for (const episode of episodes) {
+        if (!episode.enabled || episode.status === 'loading') continue;
+        total++;
+        const status = getStatus(episode.id);
+        if (status === 'completed') completed++;
+        else if (status === 'error') errors++;
+    }
+
+    return { completed, errors, total };
+}
+
 export const useEpisodeQueueStore = defineStore('episodeQueue', () => {
     // ─── Processing state ───────────────────────────────────────
     const episodeProgress = ref<Map<string, EpisodeProgress>>(new Map());
@@ -128,25 +176,6 @@ export const useEpisodeQueueStore = defineStore('episodeQueue', () => {
         return Array.from(episodeProgress.value.entries())
             .filter(([k]) => k.startsWith(`${pid}::`))
             .some(([, p]) => p.status === 'preprocessing' || p.status === 'muxing');
-    });
-
-    const completedCount = computed(() => {
-        const pid = projectStore.currentProject?.id ?? '__global';
-        return Array.from(episodeProgress.value.entries())
-            .filter(([k]) => k.startsWith(`${pid}::`))
-            .filter(([, p]) => p.status === 'completed').length;
-    });
-
-    const errorCount = computed(() => {
-        const pid = projectStore.currentProject?.id ?? '__global';
-        return Array.from(episodeProgress.value.entries())
-            .filter(([k]) => k.startsWith(`${pid}::`))
-            .filter(([, p]) => p.status === 'error').length;
-    });
-
-    const totalCount = computed(() => {
-        const pid = projectStore.currentProject?.id ?? '__global';
-        return Array.from(episodeProgress.value.keys()).filter(k => k.startsWith(`${pid}::`)).length;
     });
 
     /**
@@ -238,6 +267,36 @@ export const useEpisodeQueueStore = defineStore('episodeQueue', () => {
         if (processingQueue.value.length === 0) {
             isProcessing.value = false;
         }
+    }
+
+    /**
+     * Mark a completed episode as stale after its configuration was edited
+     * (name, track metadata, chapters, filename override, …). The existing
+     * output on disk is left alone — only the in-memory completion state is
+     * cleared so the episode counts as pending work again.
+     *
+     * Distinct from {@link resetEpisode}: this never aborts an in-flight mux,
+     * and it requeues the episode so the next batch picks it up. Callers
+     * already disable editing while an episode is muxing; the guard here
+     * keeps that invariant enforced at the store level too.
+     */
+    function invalidateEpisode(episodeId: string) {
+        const current = getProgress(episodeId);
+        if (current.status === 'preprocessing' || current.status === 'muxing') return;
+
+        setProgress(episodeId, {
+            status: 'pending',
+            progress: 0,
+            currentStep: '',
+            error: undefined,
+            elapsedMs: undefined,
+            pps: undefined,
+            estimatedRemainingMs: undefined,
+            totalTimecode: undefined,
+            totalPacketsWritten: undefined,
+            trackProgress: undefined,
+        });
+        enqueue([episodeId]);
     }
 
     /**
@@ -673,9 +732,6 @@ export const useEpisodeQueueStore = defineStore('episodeQueue', () => {
         // Computed
         hasActiveProcessing,
         lockReason,
-        completedCount,
-        errorCount,
-        totalCount,
 
         // Actions
         getProgress,
@@ -683,6 +739,7 @@ export const useEpisodeQueueStore = defineStore('episodeQueue', () => {
         clearProgress,
         clearAllProgress,
         resetEpisode,
+        invalidateEpisode,
         restartEpisode,
         enqueue,
         dequeue,

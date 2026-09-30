@@ -162,6 +162,9 @@ const { isPressing, hasLongPressed, onMouseDown, onMouseUp, onMouseLeave, onTouc
 });
 
 // ─── Track update handlers (forwarded from EpisodeTrackRow) ─
+// Completion invalidation happens in EpisodeTrackRow.updateTrackOverride,
+// which every one of these emits follows, including tag/mime/filename edits
+// that never reach the parent.
 
 function handleTrackUpdate(trackIndex: number, field: 'title' | 'language', value: string | undefined) {
     const track = props.episode.tracks[trackIndex];

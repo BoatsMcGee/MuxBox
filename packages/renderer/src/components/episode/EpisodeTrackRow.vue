@@ -43,6 +43,11 @@ const isThisEpisodeMuxing = computed(() =>
  * Since we don't have the demuxerMapKey at this layer, we use the
  * episodeId as the stable key prefix. The caller (preload) reconstructs
  * the full key when applying overrides during muxing.
+ *
+ * This is the single choke point for track-level edits (title, language,
+ * delay, dispositions, tags, mime, filename), so it is also where the
+ * episode's completion is invalidated — the muxed output no longer matches
+ * the configured track.
  */
 function updateTrackOverride(field: string, value: string | undefined, disposition?: number | undefined): void {
     if (!props.episodeId || isThisEpisodeMuxing.value) return;
@@ -114,6 +119,8 @@ function updateTrackOverride(field: string, value: string | undefined, dispositi
         if (Object.keys(e).length === 0) delete d.queueTrackOverrides![props.episodeId][stableKey];
         if (Object.keys(d.queueTrackOverrides![props.episodeId]).length === 0) delete d.queueTrackOverrides![props.episodeId];
     });
+
+    queueStore.invalidateEpisode(props.episodeId);
 }
 
 // ─── Inline editing helpers (title/language) ─────────────────

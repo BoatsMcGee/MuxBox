@@ -21,7 +21,7 @@ import { filenameParse } from '@ctrl/video-filename-parser';
 import { tryParseRegex, isGenericSeasonName } from '@/lib/utils';
 import type { EpisodeStatus } from '@/types/episode';
 import EpisodeQueueItem from './EpisodeQueueItem.vue';
-import { useEpisodeQueueStore } from '@/stores/useEpisodeQueueStore';
+import { useEpisodeQueueStore, computeQueueCompletionStats } from '@/stores/useEpisodeQueueStore';
 import { useProjectStore } from '@/stores/useProjectStore';
 import { useSettingsStore } from '@/stores/useSettingsStore';
 import { templateFileNameFromStreamInfo } from '@/lib/stream-match';
@@ -118,7 +118,6 @@ const settingsStore = useSettingsStore();
 const episodes = ref<EpisodeQueueItemData[]>([]);
 const selectedIds = ref<Set<string>>(new Set());
 const expandedEpisodeId = ref<string | null>(null);
-const viewMode = ref<'basic' | 'advanced'>('advanced');
 
 /**
  * Flag to suppress rebuildEpisodes when the only source change was a
@@ -727,6 +726,9 @@ watch(
         if (suppressChapterRebuild) return;
         const changeType = classifyChange(newProject, oldProject ?? undefined);
         if (changeType === 'full-rebuild') {
+            // A rebuild means source or mux-option config changed underneath
+            // every row, so no existing output can be trusted any more.
+            for (const ep of episodes.value) queueStore.invalidateEpisode(ep.id);
             if (rebuildTimer) clearTimeout(rebuildTimer);
             rebuildTimer = setTimeout(() => { rebuildEpisodes(); rebuildTimer = undefined; }, 500);
         }
@@ -756,9 +758,7 @@ const unassignedCount = computed(() => episodes.value.filter(e => e.status === '
 const isAnyLoading = computed(() => episodes.value.some(e => e.status === 'loading'));
 
 const processingStats = computed(() => ({
-    completed: queueStore.completedCount,
-    errors: queueStore.errorCount,
-    total: queueStore.totalCount,
+    ...computeQueueCompletionStats(episodes.value, (id) => queueStore.getProgress(id).status),
     isActive: queueStore.hasActiveProcessing,
 }));
 
@@ -804,8 +804,13 @@ function restartProcessing(id: string) {
 function resetEpisode(id: string) { queueStore.resetEpisode(id); }
 function stopProcessing(id: string) { queueStore.stopProcessing(id); }
 
+// Per-episode edits below invalidate the episode's completion so it counts as
+// pending work again. Source-level edits (stream match rules, excluded tracks,
+// TMDB name overrides) are deliberately not handled here — they would need
+// per-episode impact analysis to know which rows they actually affect.
 function clearFilenameOverride(id: string): void {
     projectStore.updateProject((d: ProjectData) => { if (d.rename.filenameOverrides) delete d.rename.filenameOverrides[id]; });
+    queueStore.invalidateEpisode(id);
 }
 
 function setFilenameOverride(id: string, value: string): void {
@@ -813,6 +818,7 @@ function setFilenameOverride(id: string, value: string): void {
         if (!d.rename.filenameOverrides) d.rename.filenameOverrides = {};
         d.rename.filenameOverrides[id] = value;
     });
+    queueStore.invalidateEpisode(id);
 }
 
 function handleToggleOverwrite(id: string) {
@@ -823,6 +829,8 @@ function handleToggleOverwrite(id: string) {
         const map = opts.perFileOverwrite as Record<string, boolean>;
         map[id] = !map[id];
     });
+    // Overwrite changes what the next run does to an existing output file.
+    queueStore.invalidateEpisode(id);
 }
 
 function handleToggleChapters(episodeId: string, sourceIdx: number) {
@@ -842,6 +850,8 @@ function handleToggleChapters(episodeId: string, sourceIdx: number) {
             draft.sources[sourceIdx].perFileChapters = {};
         draft.sources[sourceIdx].perFileChapters![group.label] = newEnabled;
     });
+    // The toggle is per-file, so only this episode's chapters changed.
+    queueStore.invalidateEpisode(episodeId);
     nextTick(() => { suppressChapterRebuild = false; });
 }
 
@@ -877,10 +887,9 @@ function stopAllProcessing() { queueStore.stopAllProcessing(); }
 // ─── Header progress ─────────────────────────────────────────
 
 const totalProgress = computed(() => {
-    const completed = processingStats.value.completed;
-    const total = episodes.value.length;
+    const { completed, total } = processingStats.value;
     if (total === 0) return 0;
-    return Math.round((completed / total) * 100);
+    return Math.min(100, Math.round((completed / total) * 100));
 });
 
 const episodesDataMap = computed<Map<string, Episode>>(() => {
@@ -909,13 +918,13 @@ const episodesDataMap = computed<Map<string, Episode>>(() => {
                     <div class="flex-1 min-w-0">
                         <div class="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full">
                             <div class="h-1.5 rounded-full transition-all duration-300"
-                                :class="processingStats.errors > 0 ? 'bg-red-500' : processingStats.completed === episodes.length && episodes.length > 0 ? 'bg-green-500' : 'bg-blue-500'"
+                                :class="processingStats.errors > 0 ? 'bg-red-500' : processingStats.completed === processingStats.total && processingStats.total > 0 ? 'bg-green-500' : 'bg-blue-500'"
                                 :style="{ width: `${totalProgress}%` }" />
                         </div>
                     </div>
                     <div class="text-xs text-muted-foreground tabular-nums shrink-0">
                         <span :class="processingStats.errors > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'">{{ processingStats.completed }}</span>
-                        /{{ episodes.length }} episodes
+                        /{{ processingStats.total }} episodes
                     </div>
                     <button v-if="!processingStats.isActive"
                         class="shrink-0 px-3 py-1 text-xs font-medium bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 transition-colors"
@@ -935,11 +944,6 @@ const episodesDataMap = computed<Map<string, Episode>>(() => {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent side="bottom" align="end" :side-offset="4"
                             class="z-50 min-w-44 rounded-lg border bg-popover p-1 text-popover-foreground shadow-md">
-                            <DropdownMenuItem class="text-xs px-2 py-1.5 rounded cursor-pointer hover:bg-accent hover:text-accent-foreground transition-colors flex items-center justify-between"
-                                @click="viewMode = viewMode === 'basic' ? 'advanced' : 'basic'">
-                                {{ viewMode === 'basic' ? 'Advanced' : 'Basic' }} View
-                                <span class="text-[10px] text-muted-foreground">({{ viewMode }})</span>
-                            </DropdownMenuItem>
                             <DropdownMenuSeparator class="my-1 h-px bg-border" />
                             <DropdownMenuItem class="text-xs px-2 py-1.5 rounded cursor-pointer hover:bg-accent hover:text-accent-foreground transition-colors" @click="selectAll">Select All</DropdownMenuItem>
                             <DropdownMenuItem class="text-xs px-2 py-1.5 rounded cursor-pointer hover:bg-accent hover:text-accent-foreground transition-colors" @click="selectNone">Select None</DropdownMenuItem>
