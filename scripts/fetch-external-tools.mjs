@@ -17,8 +17,9 @@
  *                openssl@3, which has no Intel-mac bottle), re-linked into a
  *                relocatable bin/lib layout and ad-hoc re-signed.
  *   linux/*      Homebrew bottles (x86_64/arm64) for the whole formula
- *                dependency closure, re-rpath'd to $ORIGIN/../lib via
- *                patchelf only when the verify run needs it.
+ *                dependency closure; patchelf switches the placeholder
+ *                interpreter to the system loader and re-rpaths to
+ *                $ORIGIN/../lib when the verify run needs it.
  *
  * Output layout (picked up by electron-builder `extraResources` and by
  * `resolveTool()` at runtime):
@@ -337,11 +338,14 @@ function verifyTool(tool, skipVerify) {
         const hint = process.platform === 'win32'
             ? ` (exit ${result.status} — 0xC0000135/-1073741515 or 0xC0000142/-1073741502 usually mean a missing DLL)`
             : '';
+        // A null status with a signal (dyld abort, SIGKILL) is the common
+        // non-Windows failure mode — print the signal instead of `null`.
+        const exited = result.status ?? `signal ${result.signal ?? 'unknown'}`;
         if (!canRun) {
-            log(`WARN: ${name} --version exited ${result.status} on non-runnable ${exeArch} binary; skipping`);
+            log(`WARN: ${name} --version exited ${exited} on non-runnable ${exeArch} binary; skipping`);
             return;
         }
-        fail(`${name} --version exited ${result.status}${hint}\n${result.stderr ?? ''}`);
+        fail(`${name} --version exited ${exited}${hint}\n${result.stderr ?? ''}`);
     }
 
     log(`verified ${name}: ${(result.stdout ?? '').trim().split('\n')[0]}`);
@@ -907,16 +911,25 @@ async function stageBrewTools(context, formulaNames = BREW_TOOLS.map((tool) => t
 }
 
 /**
- * Map an absolute Homebrew library reference to its formula and the path
- * inside that formula's bottle, e.g.
+ * Map a Homebrew library reference to its formula and the path inside that
+ * formula's bottle, e.g.
  *   `/usr/local/Cellar/flac/1.5.0/lib/libFLAC.1.dylib`
  *     → {formula: 'flac', relative: 'lib/libFLAC.1.dylib'}
  *   `/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib`
  *     → {formula: 'openssl@3', relative: 'lib/libssl.3.dylib'}
- * Returns null for references outside a Homebrew prefix.
+ * Relocatable bottles keep Homebrew's placeholders in their install names
+ * (`brew install` substitutes them afterwards; we consume bottles directly):
+ *   `@@HOMEBREW_PREFIX@@/opt/libopusenc/lib/libopusenc.0.dylib` → libopusenc
+ * Returns null for references outside a Homebrew layout.
  */
 function parseBrewRef(ref) {
-    const match = /^(?:\/opt\/homebrew|\/usr\/local)\/(Cellar|opt)\/([^/]+)\/(.*)$/.exec(ref);
+    let normalized = ref;
+    if (normalized.startsWith('@@HOMEBREW_PREFIX@@')) {
+        normalized = normalized.slice('@@HOMEBREW_PREFIX@@'.length);
+    } else if (normalized.startsWith('@@HOMEBREW_CELLAR@@')) {
+        normalized = `/Cellar${normalized.slice('@@HOMEBREW_CELLAR@@'.length)}`;
+    }
+    const match = /^(?:\/opt\/homebrew|\/usr\/local)?\/(Cellar|opt)\/([^/]+)\/(.*)$/.exec(normalized);
     if (match === null) {
         return null;
     }
@@ -959,6 +972,17 @@ async function stageBrewLinkedTools(context, formulaNames) {
         return extractDir;
     };
 
+    // Bottle tars extract to <formula>/<version>/<path> — resolve by suffix.
+    const bottleFiles = new Map();
+    const findInBottle = async (extractDir, relative) => {
+        let files = bottleFiles.get(extractDir);
+        if (files === undefined) {
+            files = await walkFiles(extractDir);
+            bottleFiles.set(extractDir, files);
+        }
+        return files.find((file) => file.endsWith(`/${relative}`));
+    };
+
     // Root executables (version-pinned via formulaNames).
     const queue = [];
     for (const tool of BREW_TOOLS) {
@@ -992,8 +1016,8 @@ async function stageBrewLinkedTools(context, formulaNames) {
                 fail(`Cannot map dependency "${ref}" of ${file} to a Homebrew formula`);
             }
             const extractDir = await fetchBottle(parsed.formula);
-            const source = path.join(extractDir, parsed.relative);
-            if (!existsSync(source)) {
+            const source = await findInBottle(extractDir, parsed.relative);
+            if (source === undefined) {
                 fail(`${ref} (from ${file}) not found in the ${parsed.formula} bottle`);
             }
             if (stagedSources.has(source)) {
@@ -1040,7 +1064,10 @@ function machoRpaths(file) {
 }
 
 function isSystemRef(ref) {
-    return ref.startsWith('@')
+    return ref === '@rpath'
+        || ref.startsWith('@rpath/')
+        || ref.startsWith('@executable_path/')
+        || ref.startsWith('@loader_path/')
         || ref.startsWith('/usr/lib/')
         || ref.startsWith('/System/')
         || ref.startsWith('/usr/libexec/');
@@ -1049,7 +1076,9 @@ function isSystemRef(ref) {
 function isBrewRef(ref) {
     return ref.startsWith('/opt/homebrew/')
         || ref.startsWith('/usr/local/')
-        || ref.includes('/Cellar/');
+        || ref.includes('/Cellar/')
+        // Relocatable bottles keep the placeholder until `brew install` rewrites it.
+        || ref.startsWith('@@HOMEBREW_');
 }
 
 async function rewriteMachoDependencies(context) {
@@ -1148,6 +1177,12 @@ async function applyLinuxRpaths(context) {
 
     const binFiles = (await walkFiles(context.binDir)).filter((f) => !f.endsWith('.dll'));
     for (const file of binFiles) {
+        // Homebrew linux bottles ship the placeholder interpreter
+        // `@@HOMEBREW_PREFIX@@/lib/ld.so` (brew rewrites it at install time);
+        // execve treats it as a relative path and fails with ENOENT. Point at
+        // the system loader — glibc is deliberately not bundled (not in the
+        // formula closure; the host provides it, AppImage-style).
+        runOk('patchelf', ['--set-interpreter', '/lib64/ld-linux-x86-64.so.2', file]);
         runOk('patchelf', ['--set-rpath', '$ORIGIN/../lib', file]);
         normalizeNeeded(file);
     }
@@ -1258,7 +1293,9 @@ if (invokedDirectly) {
 
 export {
     main as fetchExternalTools,
+    isBrewRef,
     isRuntimeLibrary,
+    isSystemRef,
     macosDmgName,
     macosDmgUrl,
     parseBrewRef,

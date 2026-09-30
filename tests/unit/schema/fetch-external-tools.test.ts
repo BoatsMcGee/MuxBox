@@ -1,7 +1,7 @@
 import {describe, it, expect} from 'vitest';
 import {existsSync} from 'node:fs';
 import path from 'node:path';
-import {isRuntimeLibrary, macosDmgName, macosDmgUrl, parseBrewRef, pickBottleTag, repositoryFromBottleUrl, tarExecutable} from '../../../scripts/fetch-external-tools.mjs';
+import {isBrewRef, isRuntimeLibrary, isSystemRef, macosDmgName, macosDmgUrl, parseBrewRef, pickBottleTag, repositoryFromBottleUrl, tarExecutable} from '../../../scripts/fetch-external-tools.mjs';
 
 describe('repositoryFromBottleUrl', () => {
     it('maps a versioned formula bottle url to its slash-separated repository', () => {
@@ -102,6 +102,53 @@ describe('parseBrewRef', () => {
         expect(parseBrewRef('/usr/lib/libSystem.B.dylib')).toBeNull();
         expect(parseBrewRef('/usr/local/lib/rogue.dylib')).toBeNull();
         expect(parseBrewRef('@executable_path/../lib/libQt6Core.6.dylib')).toBeNull();
+    });
+
+    // Relocatable bottles keep Homebrew's placeholders until `brew install` rewrites them.
+    it('normalizes the @@HOMEBREW_PREFIX@@ placeholder (opt references)', () => {
+        expect(parseBrewRef('@@HOMEBREW_PREFIX@@/opt/libopusenc/lib/libopusenc.0.dylib')).toEqual({
+            formula: 'libopusenc',
+            relative: 'lib/libopusenc.0.dylib',
+        });
+    });
+
+    it('normalizes the @@HOMEBREW_CELLAR@@ placeholder (versioned references)', () => {
+        expect(parseBrewRef('@@HOMEBREW_CELLAR@@/opus/1.6.1/lib/libopus.0.dylib')).toEqual({
+            formula: 'opus',
+            relative: 'lib/libopus.0.dylib',
+        });
+    });
+});
+
+describe('isSystemRef', () => {
+    it('classifies dyld special and Apple system references as system', () => {
+        expect(isSystemRef('@executable_path/libs/Qt6Core.framework/Qt6Core')).toBe(true);
+        expect(isSystemRef('@loader_path/../lib/libfoo.dylib')).toBe(true);
+        expect(isSystemRef('@rpath')).toBe(true);
+        expect(isSystemRef('/usr/lib/libSystem.B.dylib')).toBe(true);
+        expect(isSystemRef('/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation')).toBe(true);
+    });
+
+    it('does NOT swallow placeholder or Homebrew references', () => {
+        // Regression: startsWith('@') once classified @@HOMEBREW_PREFIX@@ refs as
+        // system, which skipped both the link walk and the rewrite on macOS.
+        expect(isSystemRef('@@HOMEBREW_PREFIX@@/opt/libopusenc/lib/libopusenc.0.dylib')).toBe(false);
+        expect(isSystemRef('/opt/homebrew/opt/opus/lib/libopus.0.dylib')).toBe(false);
+        expect(isSystemRef('/usr/local/Cellar/flac/1.5.0/lib/libFLAC.1.dylib')).toBe(false);
+    });
+});
+
+describe('isBrewRef', () => {
+    it('classifies resolved and placeholder Homebrew references as brew', () => {
+        expect(isBrewRef('/opt/homebrew/opt/opus/lib/libopus.0.dylib')).toBe(true);
+        expect(isBrewRef('/usr/local/Cellar/flac/1.5.0/lib/libFLAC.1.dylib')).toBe(true);
+        expect(isBrewRef('@@HOMEBREW_PREFIX@@/opt/libopusenc/lib/libopusenc.0.dylib')).toBe(true);
+    });
+
+    it('rejects system and non-Homebrew references', () => {
+        expect(isBrewRef('/usr/lib/libSystem.B.dylib')).toBe(false);
+        expect(isBrewRef('@executable_path/libs/Qt6Core.framework/Qt6Core')).toBe(false);
+        expect(isBrewRef('/opt/other/libfoo.dylib')).toBe(false);
     });
 });
 
