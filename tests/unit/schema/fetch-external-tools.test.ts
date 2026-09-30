@@ -1,7 +1,7 @@
 import {describe, it, expect} from 'vitest';
 import {existsSync} from 'node:fs';
 import path from 'node:path';
-import {repositoryFromBottleUrl, tarExecutable} from '../../../scripts/fetch-external-tools.mjs';
+import {macosDmgName, macosDmgUrl, pickBottleTag, repositoryFromBottleUrl, tarExecutable} from '../../../scripts/fetch-external-tools.mjs';
 
 describe('repositoryFromBottleUrl', () => {
     it('maps a versioned formula bottle url to its slash-separated repository', () => {
@@ -31,5 +31,58 @@ describe('tarExecutable', () => {
         } else {
             expect(tar).toBe('tar');
         }
+    });
+});
+
+describe('pickBottleTag', () => {
+    const withFiles = (files: Record<string, unknown>) => ({
+        name: 'demo',
+        bottle: {stable: {files}},
+    });
+
+    it('prefers the platform-specific linux tag', () => {
+        expect(pickBottleTag(withFiles({x86_64_linux: {}, arm64_linux: {}, all: {}}), 'linux', 'x64'))
+            .toBe('x86_64_linux');
+        expect(pickBottleTag(withFiles({x86_64_linux: {}, arm64_linux: {}}), 'linux', 'arm64'))
+            .toBe('arm64_linux');
+    });
+
+    it('falls back to the arch-independent `all` bottle on linux (ca-certificates)', () => {
+        expect(pickBottleTag(withFiles({all: {}}), 'linux', 'x64')).toBe('all');
+    });
+
+    it('fails on linux when only the other architecture is bottled', () => {
+        expect(() => pickBottleTag(withFiles({arm64_linux: {}}), 'linux', 'x64'))
+            .toThrow('has no x86_64_linux bottle');
+    });
+
+    it('uses the `all` bottle on arm64 macOS when no arm64 tag exists', () => {
+        expect(pickBottleTag(withFiles({all: {}}), 'darwin', 'arm64')).toBe('all');
+    });
+
+    it('prefers the oldest available macOS codename over `all`', () => {
+        expect(pickBottleTag(withFiles({all: {}, arm64_sonoma: {}, arm64_sequoia: {}}), 'darwin', 'arm64'))
+            .toBe('arm64_sonoma');
+    });
+
+    it('picks the oldest Intel macOS tag', () => {
+        expect(pickBottleTag(withFiles({sonoma: {}, ventura: {}}), 'darwin', 'x64')).toBe('ventura');
+    });
+
+    it('fails when the formula publishes no bottles at all', () => {
+        expect(() => pickBottleTag({name: 'demo'}, 'linux', 'x64'))
+            .toThrow('publishes no bottles');
+    });
+});
+
+describe('macosDmgName', () => {
+    it('maps arches to the upstream slice names', () => {
+        expect(macosDmgName('x64')).toBe('MKVToolNix-102.0-2-x86_64.dmg');
+        expect(macosDmgName('arm64')).toBe('MKVToolNix-102.0-2-arm64.dmg');
+    });
+
+    it('builds a release-relative url', () => {
+        expect(macosDmgUrl('x64'))
+            .toBe('https://mkvtoolnix.download/macos/releases/102.0/MKVToolNix-102.0-2-x86_64.dmg');
     });
 });

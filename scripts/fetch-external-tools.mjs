@@ -11,9 +11,10 @@
  *   win32-arm64  The same official x64 mkvtoolnix build (no arm64 release
  *                exists; runs under Windows 11 ARM emulation) + native MSYS2
  *                clang-aarch64 opus-tools.
- *   darwin/*     Homebrew bottles (built from the official sources), both
- *                tools plus their runtime library closure, re-linked into a
- *                relocatable bin/lib layout and ad-hoc re-signed.
+ *   darwin/*     Official MKVToolNix DMG (Homebrew has no Intel-mac bottle)
+ *                + Homebrew opus-tools bottles with their runtime closure,
+ *                re-linked into a relocatable bin/lib layout and ad-hoc
+ *                re-signed.
  *   linux/*      Homebrew bottles (x86_64/arm64), re-rpath'd to
  *                $ORIGIN/../lib via patchelf only when the verify run needs it.
  *
@@ -44,6 +45,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // ---------------------------------------------------------------------------
 
 const MKVTOOLNIX_VERSION = '102.0';
+/** Official macOS DMG build revision (pinned via the upstream file name). */
+const MKVTOOLNIX_MAC_BUILD = '2';
+/** Upstream release index for the official macOS DMGs. */
+const MACOS_RELEASES = 'https://mkvtoolnix.download/macos/releases';
 const OPUS_TOOLS_PIN = '0.2';
 
 /** MSYS2 opus-tools packages: root name, expected pkg file, sha256, mirrors. */
@@ -592,6 +597,115 @@ async function stageWindowsOpusenc(context) {
 }
 
 // ---------------------------------------------------------------------------
+// macOS: official MKVToolNix DMG
+// ---------------------------------------------------------------------------
+
+/** DMG file name for a Mac arch, e.g. `MKVToolNix-102.0-2-arm64.dmg`. */
+function macosDmgName(arch) {
+    const slice = arch === 'arm64' ? 'arm64' : 'x86_64';
+    return `MKVToolNix-${MKVTOOLNIX_VERSION}-${MKVTOOLNIX_MAC_BUILD}-${slice}.dmg`;
+}
+
+function macosDmgUrl(arch) {
+    return `${MACOS_RELEASES}/${MKVTOOLNIX_VERSION}/${macosDmgName(arch)}`;
+}
+
+/**
+ * Homebrew bottles mkvtoolnix for arm64 Macs only — there is no Intel-mac
+ * bottle — so both Mac arches stage mkvmerge/mkvinfo from the official DMG
+ * (the same official-binary approach as the Windows portable 7z). The CLI
+ * tools reference their bundled dylibs as `@executable_path/libs/<name>`;
+ * that closure is staged into lib/ here and rewritten to the shipped
+ * `@executable_path/../lib` layout by rewriteMachoDependencies().
+ */
+async function stageMacMkvToolNix(context) {
+    const fileName = macosDmgName(context.arch);
+    const url = macosDmgUrl(context.arch);
+
+    // Checksums ship next to the release (same pattern as the Windows 7z).
+    const sumsUrl = `${MACOS_RELEASES}/${MKVTOOLNIX_VERSION}/sha256sums.txt`;
+    const sums = await downloadText(sumsUrl);
+    let expected;
+    for (const line of sums.split(/\r?\n/)) {
+        const match = line.match(/^([0-9a-fA-F]{64})\s+\*?(.+?)\s*$/);
+        if (match && match[2] === fileName) {
+            expected = match[1].toLowerCase();
+            break;
+        }
+    }
+    if (expected === undefined) {
+        fail(`${fileName} not listed in ${sumsUrl} — upstream layout changed?`);
+    }
+
+    log(`downloading ${fileName}`);
+    const dmg = path.join(context.tmpDir, fileName);
+    await download(url, dmg);
+    const actual = await hashFile(dmg, 'sha256');
+    if (actual !== expected) {
+        fail(`sha256 mismatch for ${fileName}: expected ${expected}, got ${actual}`);
+    }
+
+    let mountDir;
+    try {
+        const attach = runOk('hdiutil', ['attach', dmg, '-nobrowse', '-readonly', '-plist']);
+        const mountPoints = [...attach.stdout.matchAll(
+            /<key>mount-point<\/key>\s*<string>([^<]+)<\/string>/g,
+        )];
+        mountDir = mountPoints.at(-1)?.[1];
+        if (mountDir === undefined) {
+            fail(`hdiutil attach of ${fileName} reported no mount point: ${attach.stdout}`);
+        }
+
+        const appMacOS = path.join(mountDir, 'MKVToolNix.app', 'Contents', 'MacOS');
+        const libsDir = path.join(appMacOS, 'libs');
+
+        // Executables, then the transitive dylib closure they reference.
+        const queue = [];
+        for (const name of ['mkvmerge', 'mkvinfo']) {
+            const source = path.join(appMacOS, name);
+            if (!existsSync(source)) {
+                fail(`${name} not found in ${fileName} — upstream bundle layout changed?`);
+            }
+            const file = await copyInto(source, context.binDir);
+            context.tools.push({name, file, exeArch: context.arch});
+            queue.push(source);
+        }
+
+        let libCount = 0;
+        while (queue.length > 0) {
+            const file = queue.shift();
+            for (const ref of machoDependencies(file)) {
+                const match = /^@executable_path\/libs\/([^/]+)$/.exec(ref);
+                if (match === null) {
+                    continue;
+                }
+                const source = path.join(libsDir, match[1]);
+                if (!existsSync(source)) {
+                    fail(`Dependency ${ref} of ${path.basename(file)} missing in ${fileName}`);
+                }
+                if (existsSync(path.join(context.libDir, match[1]))) {
+                    continue;
+                }
+                await copyInto(source, context.libDir);
+                queue.push(source);
+                libCount += 1;
+            }
+        }
+        log(`staged MKVToolNix ${MKVTOOLNIX_VERSION} official ${context.arch} DMG (${libCount} dylibs)`);
+    } finally {
+        if (mountDir !== undefined) {
+            let detach = run('hdiutil', ['detach', mountDir]);
+            if (detach.status !== 0) {
+                detach = run('hdiutil', ['detach', mountDir, '-force']);
+            }
+            if (detach.status !== 0) {
+                log(`WARN: could not detach ${mountDir}: ${detach.stderr ?? detach.error?.message ?? ''}`);
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // macOS / Linux: Homebrew bottles
 // ---------------------------------------------------------------------------
 
@@ -612,27 +726,39 @@ function assertPinned(formula, pin) {
     }
 }
 
-function pickBottleTag(formula) {
+/**
+ * Bottle tag for the given platform/arch (overridable for tests). Some
+ * formulae — e.g. ca-certificates — publish only an arch-independent bottle
+ * tagged `all`; it is accepted whenever no platform-specific tag exists.
+ */
+function pickBottleTag(formula, platform = process.platform, arch = process.arch) {
     const files = formula.bottle?.stable?.files;
     if (files === undefined) {
         fail(`Homebrew ${formula.name} publishes no bottles`);
     }
     const candidates = Object.keys(files);
 
-    if (process.platform === 'linux') {
-        const wanted = process.arch === 'arm64' ? 'arm64_linux' : 'x86_64_linux';
+    if (platform === 'linux') {
+        const wanted = arch === 'arm64' ? 'arm64_linux' : 'x86_64_linux';
         if (files[wanted] === undefined) {
+            if (files.all !== undefined) {
+                return 'all';
+            }
             fail(`Homebrew ${formula.name} has no ${wanted} bottle (have: ${candidates.join(', ')})`);
         }
         return wanted;
     }
 
-    const prefix = process.arch === 'arm64' ? 'arm64_' : '';
+    const prefix = arch === 'arm64' ? 'arm64_' : '';
     const archCandidates = candidates.filter((tag) =>
-        (process.arch === 'arm64' ? tag.startsWith('arm64_') : !tag.startsWith('arm64_'))
+        tag !== 'all'
+        && (arch === 'arm64' ? tag.startsWith('arm64_') : !tag.startsWith('arm64_'))
         && !tag.endsWith('_linux'));
     if (archCandidates.length === 0) {
-        fail(`Homebrew ${formula.name} has no ${process.arch} bottle`);
+        if (files.all !== undefined) {
+            return 'all';
+        }
+        fail(`Homebrew ${formula.name} has no ${arch} bottle`);
     }
     // Oldest macOS tag available → widest compatibility with newer systems.
     for (const codename of MACOS_TAGS) {
@@ -709,8 +835,8 @@ async function brewClosure(rootNames) {
     return closure;
 }
 
-async function stageBrewTools(context) {
-    const rootNames = BREW_TOOLS.map((tool) => tool.formula);
+async function stageBrewTools(context, formulaNames = BREW_TOOLS.map((tool) => tool.formula)) {
+    const rootNames = formulaNames;
     const rootFormulas = new Map();
     for (const name of rootNames) {
         const formula = await brewFormula(name);
@@ -730,8 +856,11 @@ async function stageBrewTools(context) {
         extractDirs.set(name, await downloadBottle(formula, tag, stagingRoot));
     }
 
-    // Executables from the two root formulae.
+    // Executables from the requested root formulae.
     for (const tool of BREW_TOOLS) {
+        if (!rootNames.includes(tool.formula)) {
+            continue;
+        }
         const extractDir = extractDirs.get(tool.formula);
         const files = await walkFiles(extractDir);
         for (const executable of tool.executables) {
@@ -818,6 +947,21 @@ async function rewriteMachoDependencies(context) {
         let modified = false;
 
         for (const ref of machoDependencies(file)) {
+            // Official MKVToolNix DMG: dylibs live in Contents/MacOS/libs;
+            // the shipped layout keeps them in ../lib next to the binaries.
+            const dmgRef = /^@executable_path\/libs\/([^/]+)$/.exec(ref);
+            if (dmgRef !== null) {
+                const base = dmgRef[1];
+                if (!existsSync(path.join(context.libDir, base))) {
+                    fail(`Dependency "${ref}" of ${file} has no staged library ${base} in lib/`);
+                }
+                const replacement = isExe
+                    ? `@executable_path/../lib/${base}`
+                    : `@loader_path/${base}`;
+                runOk('install_name_tool', ['-change', ref, replacement, file]);
+                modified = true;
+                continue;
+            }
             if (isSystemRef(ref)) {
                 continue;
             }
@@ -946,9 +1090,14 @@ async function main() {
             await stageWindowsOpusenc(context);
         } else {
             await fs.mkdir(context.libDir, {recursive: true});
-            await stageBrewTools(context);
             if (platform === 'darwin') {
+                // mkvtoolnix ships via the official DMG on both Mac arches
+                // (Homebrew has no Intel-mac bottle); opusenc stays on bottles.
+                await stageMacMkvToolNix(context);
+                await stageBrewTools(context, ['opus-tools']);
                 await rewriteMachoDependencies(context);
+            } else {
+                await stageBrewTools(context);
             }
         }
 
@@ -991,4 +1140,11 @@ if (invokedDirectly) {
     });
 }
 
-export {main as fetchExternalTools, repositoryFromBottleUrl, tarExecutable};
+export {
+    main as fetchExternalTools,
+    macosDmgName,
+    macosDmgUrl,
+    pickBottleTag,
+    repositoryFromBottleUrl,
+    tarExecutable,
+};

@@ -39,6 +39,8 @@ function findExecutable(): string {
     const candidates = [
         'dist/win-unpacked/MuxBox.exe',
         'dist/win-unpacked/muxbox.exe',
+        'dist/win-arm64-unpacked/MuxBox.exe',
+        'dist/win-arm64-unpacked/muxbox.exe',
         'dist/linux-unpacked/MuxBox',
         'dist/linux-unpacked/muxbox',
         'dist/mac/MuxBox.app/Contents/MacOS/*',
@@ -82,7 +84,15 @@ export const test = base.extend<Fixtures>({
         });
 
         const page = await electronApp.firstWindow();
-        page.on('pageerror', (error) => console.error('[pageerror]', error));
+        page.on('pageerror', (error) => {
+            if (error instanceof Error) {
+                console.error('[pageerror]', error.stack ?? error.message);
+                return;
+            }
+            // Electron sometimes delivers raw values here — print the runtime
+            // kind so a repeat can identify the emitter instead of `[Event]`.
+            console.error(`[pageerror] non-Error value: ${String(error)} (${typeof error})`);
+        });
         await page.waitForLoadState('load');
 
         // A dev build auto-opens DevTools; a docked pane steals page width
