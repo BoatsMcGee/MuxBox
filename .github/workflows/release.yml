@@ -102,7 +102,7 @@ jobs:
       name: ${{ needs.prepare.outputs.distribution-channel }}
       url: https://github.com/${{ github.repository }}/releases/tag/${{ needs.prepare.outputs.tag }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # One directory per compile job — kept separate so the channel files
       # can be merged instead of clobbered (see merge-update-files.mjs).
