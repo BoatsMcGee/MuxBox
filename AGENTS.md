@@ -33,6 +33,17 @@
 - No committed `.only`/`.skip` (unless explicitly justified).
 - Bug fixes must include a regression test.
 - Avoid snapshots unless they add clear value and are stable.
+- Unit tests mirror source structure: `tests/unit/<area>/<file>.test.ts` for `packages/<area>/src/<file>.ts`. Tests that must re-implement production logic (e.g. `muxing-concurrency.test.ts` mirrors the store's concurrency expression) say so in a comment and assert the real file's text where it matters.
+
+### Integration tests (Playwright)
+- `npm run test:integration` drives the **packaged** Electron app from `dist/` (not a dev server) and is a required gate: it produces the documentation screenshots. Run `npm run compile` first — `findExecutable()` in `helpers/fixtures.ts` throws a clear error if no unpacked build exists.
+- The suite runs at `workers: 1`, `fullyParallel: false`, because the Electron instance and its appdata are shared and several specs depend on ordered UI interaction. The `app` fixture is nevertheless **test-scoped** (a fresh Electron per test) to keep IPC dialog stubs isolated — do not "parallelise" the config, and do not hoist the fixture to worker scope.
+- Test isolation relies on env vars the app reads at startup: `MUXBOX_USER_DATA` redirects appdata to `tests/integration/appdata` (see `packages/entry-point.mjs`) and `PLAYWRIGHT_TEST=true` enables the crash handlers. Chromium is launched with `--force-device-scale-factor=1`; Electron ignores `page.screenshot({scale:'css'})`, so a 150% display would otherwise yield 2880x1620 captures.
+- The media corpus under `tests/integration/corpus/` is **generated, never committed**. `generate-corpus.ts` synthesizes it with the FFmpeg bundled by `node-av`, in two phases (expensive base encodes once, then `-c copy` remux per episode), gated by a `.stamp` version. Bump `STAMP_VERSION` to force a rebuild.
+- `global-teardown.ts` encodes temporary PNGs to 1920x1080 AVIF and **replaces `media/screenshots/` wholesale** — but only when the whole suite passes. A failing run writes `RUN_FAILED_MARKER` and keeps `media/screenshots-temporary/` plus `tests/integration/appdata/` for inspection. Never promote screenshots by hand.
+- Captures must be exactly 1920x1080. `helpers/screenshot.ts` throws on any other size, because a docked DevTools pane would otherwise be stretched to fit and silently ship distorted docs images.
+- Adding a screenshot means adding the `light/` and `dark/` pair and a `<picture>` element in the relevant `docs/*.md` page, then regenerating.
+- CI runs the full suite on Windows x64 and a single-spec smoke on Windows ARM; macOS and Linux do not run integration tests.
 
 ## Style, docs, and security
 - Follow existing formatting/lint; keep functions small and readable.
@@ -40,6 +51,7 @@
 - Update docs/comments when behavior changes (comments explain “why”, not “what”).
 - Never log secrets; validate/sanitize external inputs (paths/URLs/user data).
 - Dependency adds must be justified (need, alternatives, maintenance/license/security impact).
+- `CHANGELOG.md` is user-facing only: record features, behavior changes, and bug fixes, and omit CI, release-pipeline, and build-script work. Keep a Changelog format; add user-facing changes to the `## [Unreleased]` section as you land them, then rename it at release time.
 
 ## MUST NOT
 - Change public APIs or introduce breaking changes without explicit instruction.
@@ -69,6 +81,11 @@
 ### Resource cleanup
 - `EpisodeMuxer` implements the `AsyncDisposable` protocol. Always use `await using muxer = await EpisodeMuxer.init(...)` or call `muxer[Symbol.asyncDispose]()` in a `finally` block.
 - New classes that own native resources (Demuxer references, temp files, child processes) should also implement `AsyncDisposable`.
+- **Every packet popped off the heap must be freed exactly once.** `Packet` is a native handle; leaking one per packet exhausts memory on large files. Free on every exit path — dropped, filtered, and cancelled alike — and wrap writes in `try { … } finally { packet.free(); }` so a throwing write cannot skip the free. Read `packet.dts`/`pts` *before* freeing (`recordPacket` needs them).
+
+### Hot-path performance
+- Per-packet `BigInt` maths is a real cost: precompute loop-invariant values (e.g. delay in stream time-base units) once per stream into the write-context map, not per packet.
+- Node 23 exposes `node:worker_threads.Atomics` and `SharedArrayBuffer`. `DemuxPacketReader` uses `Atomics.wait()` on an `Int32Array` to emulate a blocking read inside sync iteration; do not "optimize" that into a busy loop.
 
 ### MediaInfo
 - `mediainfo.js` is optional — wrap all calls in try/catch and fall back to FFmpeg metadata on failure.
@@ -79,6 +96,16 @@
 - The `Selector<T>` type family defines recursive matching with operators: `equal`, `not`, `allOf`, `anyOf`, `oneOf`, `greaterThan`, `lessThan`, `pattern`, `contains`, `startsWith`, `endsWith`.
 - `RegExp` objects in match patterns are not JSON-serializable. Convert to strings before IPC (`val instanceof RegExp ? val.toString() : val`) and restore with `tryParseRegex()` at the boundary.
 - New selector properties must be added to the switch statement in `BaseSelector.select()` and to the corresponding `*StreamMatch` interface in `episode/types.ts`.
+
+### Simulator / muxer parity
+- The queue's preview model is built by `buildEpisodeModel()` in `packages/muxer/src/episode/simulator.ts`. It must agree with what `EpisodeMuxer` actually does, or the queue lies about the output.
+- Queue-level per-track overrides are applied by `applyOverridesToModel()`, called separately from `buildEpisodeModel()` because the caller has the episode ID. Overrides mutate comparisons in place; `buildEpisodeModel()` deliberately ignores its `_queueOverrides` parameter. Do not fold override application back into the model builder.
+- Overrides are keyed `"demuxerMapKey:originalIndex"` and only apply to subtitles for `compress`; an explicit `false` must be honoured, so compare against `undefined`, never truthiness.
+
+### Cross-boundary duplicated allowlists
+- Some constants must exist on both sides of the IPC boundary and cannot be shared, because the renderer may not import backend packages. Each duplicate is a drift risk — when you change one, change the other and extend the matching test.
+  - Text-subtitle codec allowlist: `isTextBasedSubtitleTrack()` in `@app/mkvtoolnix` and `isTextSubtitleCodec()` / `TEXT_SUBTITLE_CODEC_VAR_NAMES` in `packages/renderer/src/lib/stream-match.ts`. Bitmap subtitles (PGS, VoBSub, DVB, XSUB) are excluded on purpose.
+  - Disposition flags: `ALL_DISPOSITIONS` in `packages/muxer/src/sorter/index.ts` uses `AV_DISPOSITION_*` from `node-av`, while the renderer hardcodes the same values as decimal strings in `DISPOSITION_OPTIONS` (`packages/renderer/src/components/source/config/disposition-options.ts`). The numeric values are the contract; changing one without the other silently mislabels flags. `DISPOSITION_SORT_PRIORITY` in the simulator is a third, partial copy.
 
 ### Context bridge (IPC)
 - Functions are exposed to the renderer via `contextBridge.exposeInMainWorld(btoa(name), fn)`. New exported functions in `@app/preload` automatically become available.
@@ -120,7 +147,8 @@
 - Theme customization goes in the `@theme inline {}` block in `style.css`, not in a `tailwind.config.js`.
 - Maintain OKLCH color space for all CSS custom properties.
 - Dark mode uses `.dark` class variant via `@custom-variant dark (&:is(.dark *));`.
-- Prefer CSS animations (via `tw-animate-css`) over JS-based animation libraries.
+- Prefer CSS animations over JS-based animation libraries. Use Vue `<Transition>` or plain
+  `@keyframes` in the component's scoped `<style>` block; no animation library is installed.
 
 ### Icons
 - Use Lucide Vue with named imports: `import { IconName } from '@lucide/vue'`. These are tree-shakeable.
@@ -150,9 +178,13 @@
 - Standard shortcuts: `Ctrl+Z` / `Cmd+Z` for undo, `Ctrl+Shift+Z` / `Cmd+Shift+Z` or `Ctrl+Y` / `Cmd+Y` for redo.
 - New views with editable state should adopt the same debounced-save pattern.
 
-### Deprecated (do not use in new code)
-- `class-variance-authority` (CVA) — being removed. Reka UI handles state via data attributes.
-- `tw-animate-css` — under evaluation; Reka UI works with Vue `<Transition>` or CSS keyframes directly.
+### Theme syncing
+- The `.dark` class on `<html>` is the single source of truth for theming. `applyTheme()` in the
+  settings store sets it; never toggle it ad hoc from a component.
+- Monaco's theme is global and does not follow the class automatically. Register each editor's
+  setter with `registerMonacoThemeSetter()` and release it with `unregisterMonacoThemeSetter()` on
+  unmount; `monaco-theme.ts` observes the class and re-themes every live editor. Do not call
+  `monaco.editor.setTheme` directly from a component.
 
 ---
 
@@ -176,6 +208,9 @@
 ### Dependency management
 - Bundled CLI tools are fetched (never committed) by `scripts/fetch-external-tools.mjs` with pinned versions and checksums, staged from `buildResources/bin` via `extraResources`, resolved by `resolveTool()` with a `PATH` fallback, and shipped with license texts in `licenses/` beside each architecture's binaries.
 - Native addons (`node-av`) must match the target Electron/Node.js version (see `packages/electron-versions`). A version mismatch typically causes runtime segmentation faults, not build errors.
+- `node-av` is patched at `postinstall` by `patch-package` (see `patches/README.md`). The patch memoises `FormatContext.streams` and removes a per-packet array allocation in the write paths; it is worth roughly a 4x mux speedup and is load-bearing, not an optimisation to "clean up".
+- Bumping `node-av` will make `postinstall` fail loudly if upstream changed. That is intended. Re-apply the edits in `node_modules/node-av/dist/…`, delete the stale `patches/node-av+<old>.patch`, regenerate with `npx patch-package node-av`, and update `patches/README.md`. Never silence the failure or drop the patch to make install pass.
+- macOS stages `mkvmerge`/`mkvinfo` from the official MKVToolNix DMG (Homebrew has no Intel-mac bottle) plus a Homebrew `opus-tools` bottle; Linux and Windows use their own sources. `resolveTool()` hides the difference — do not reintroduce platform checks at the call site.
 - Before adding any npm dependency, confirm it works with Electron 42 / Node 23 and is available as ESM.
 
 ### Releases

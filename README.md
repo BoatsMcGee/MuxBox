@@ -38,7 +38,6 @@ MuxBox is for the most part feature-complete for my personal use, but is in need
 * Rearchitect Episode Queue
 * Improve Stream Match Selector feedback (track indicates which Stream Configuration picked it)
 * Prevent multiple Stream Configurations from matching the same track (produces unexpected results)
-* Add default Rename Template to Settings
 * Add a way to export, import, and share Stream Configurations
 * Remove or workaround 10-event-listener limit (Prevents more than 10 episodes from being muxed at once)
 * Rewrite all documentation by hand
@@ -97,6 +96,7 @@ To test, run `npm run test:unit`. For integration tests, run `npm run test:integ
   portable Windows build.
 * Windows and Linux installs update themselves in-app; macOS prompts and opens
   the release page, because self-updating unsigned macOS apps is not possible.
+* User-facing changes are listed in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Usage documentation
 
@@ -109,7 +109,7 @@ Full task-oriented guides with screenshots live in [`docs/`](docs/index.md):
 | [Episode Queue](docs/episode-queue.md) | Episode rows, tracks, container, chapters, tooltips |
 | [Source](docs/source.md) | Add/edit source, match patterns, capture groups, metadata & chapters |
 | [Stream Match Preview](docs/stream-match-preview.md) | Stream Configuration builder, filters, modify & preprocess rules |
-| [Settings](docs/settings.md) | TMDB token, theme, multiplexer method, concurrency |
+| [Settings](docs/settings.md) | TMDB token, theme, default rename template, multiplexer method, concurrency |
 
 ## Screenshots
 

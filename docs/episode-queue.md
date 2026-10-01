@@ -25,7 +25,9 @@ the per-type match summary once expanded.
 
 Expand an episode, then expand a track (video/audio/subtitle/attachment) to
 edit its **codec, title, language, dispositions, delay, and tags** — these
-overrides apply to that episode only:
+overrides apply to that episode only. Text subtitle tracks also get a
+**zlib Compression** toggle that overrides the source configuration for that
+episode (see [zlib compression](stream-match-preview.md#zlib-compression)):
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../media/screenshots/dark/project/queue-tracks.avif">
