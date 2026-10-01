@@ -8,7 +8,9 @@
 **Batch multiplexer with heuristics-based stream selection.**
 Point MuxBox at a folder of episodes, match video/audio/subtitle streams with rules and capture groups, preview every decision, and mux an entire series in one queue.
 
-> [!NOTE] LLM Disclosure
+> [!NOTE]
+> LLM Disclosure
+>
 > With the exception of the core muxer, MuxBox is developed with the use of large language models (LLMs). This should go without saying but I maintain full responsibility of everything published.
 
 ## Features
