@@ -22,6 +22,60 @@ export const REPO_ROOT = process.cwd();
 export const VIDEO_DIR = path.join(REPO_ROOT, 'tests', 'integration', 'corpus', 'Video');
 export const SPECIALS_DIR = path.join(REPO_ROOT, 'tests', 'integration', 'corpus', 'Specials');
 
+/** Screenshot viewport (content size, excluding window chrome). */
+export const SCREENSHOT_WIDTH = 1920;
+export const SCREENSHOT_HEIGHT = 1080;
+
+/**
+ * Force the window to exactly 1920x1080 *content* and make sure the renderer
+ * actually adopts it.
+ *
+ * A docked DevTools pane splits the window: native `getContentSize()` still
+ * reports the full 1920 while `window.innerWidth` collapses by the pane width
+ * (measured: 555px). Screenshots are taken from `window.innerWidth` (see
+ * capture()), so such a run silently produces narrow images that are then
+ * stretched during encoding.
+ *
+ * The pane opens on its own about a second after the page loads, and again
+ * after every page.reload(). `isDevToolsOpened()` is false at t=0 and true by
+ * t=1s, so a single check races it and loses. This resizes, closes, and then
+ * VERIFIES the width the renderer reports, retrying until it matches.
+ */
+export async function setScreenshotViewport(app: ElectronApplication, page: Page): Promise<void> {
+    let last = {width: 0, height: 0};
+
+    for (let attempt = 1; attempt <= 6; attempt++) {
+        await app.evaluate(({BrowserWindow}, size) => {
+            const win = BrowserWindow.getAllWindows()[0];
+            if (!win) return;
+            win.setContentSize(size.width, size.height);
+            if (win.webContents.isDevToolsOpened()) win.webContents.closeDevTools();
+        }, {width: SCREENSHOT_WIDTH, height: SCREENSHOT_HEIGHT});
+
+        // The renderer applies the resize asynchronously; give it a beat, then
+        // trust the DOM over the native call.
+        await page.waitForTimeout(500);
+        last = await page.evaluate(() => ({width: window.innerWidth, height: window.innerHeight}));
+        if (last.width === SCREENSHOT_WIDTH && last.height === SCREENSHOT_HEIGHT) {
+            // Correct once is not enough: the pane can still open a moment
+            // later and steal the width back. Require it to hold.
+            await page.waitForTimeout(750);
+            const after = await page.evaluate(() => ({
+                width: window.innerWidth,
+                height: window.innerHeight,
+            }));
+            if (after.width === SCREENSHOT_WIDTH && after.height === SCREENSHOT_HEIGHT) return;
+            last = after;
+        }
+    }
+
+    throw new Error(
+        `Could not reach a ${SCREENSHOT_WIDTH}x${SCREENSHOT_HEIGHT} renderer viewport `
+        + `(got ${last.width}x${last.height}). A docked DevTools pane steals page width — `
+        + 'check that it is closed.',
+    );
+}
+
 /** CSS injected into the page: kill animations/transitions and the text caret
  *  so screenshots are deterministic. Re-applied after page.reload(). */
 const DETERMINISM_CSS = `
@@ -69,7 +123,12 @@ export const test = base.extend<Fixtures>({
     app: async ({}, use) => {
         const electronApp = await electron.launch({
             executablePath: findExecutable(),
-            args: ['--no-sandbox', '--hide-scrollbars'],
+            // Pin the display scale. Chromium screenshots at the device pixel
+            // ratio, so on a 150% display every capture comes out 2880x1620 and
+            // teardown rejects it. Note `page.screenshot({scale:'css'})` does NOT
+            // help here — Electron ignores it (measured: both produce 2880x1620),
+            // and `clip` is unusable because viewportSize() is null in Electron.
+            args: ['--no-sandbox', '--hide-scrollbars', '--force-device-scale-factor=1'],
             env: {
                 ...process.env,
                 PLAYWRIGHT_TEST: 'true',
@@ -95,20 +154,7 @@ export const test = base.extend<Fixtures>({
         });
         await page.waitForLoadState('load');
 
-        // A dev build auto-opens DevTools; a docked pane steals page width
-        // (narrow screenshots that would stretch to 1920x1080). Close it
-        // BEFORE setting the exact screenshot viewport.
-        await electronApp.evaluate(({BrowserWindow}) => {
-            const contents = BrowserWindow.getAllWindows()[0]?.webContents;
-            if (contents?.isDevToolsOpened()) contents.closeDevTools();
-        });
-        await page.waitForTimeout(150);
-
-        // Exact screenshot viewport (content size, excluding window chrome).
-        await electronApp.evaluate(({BrowserWindow}) => {
-            const win = BrowserWindow.getAllWindows()[0];
-            if (win) win.setContentSize(1920, 1080);
-        });
+        await setScreenshotViewport(electronApp, page);
 
         await injectDeterminismCss(page);
 
