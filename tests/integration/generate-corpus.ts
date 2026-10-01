@@ -50,6 +50,10 @@ interface SubSpec {
     disposition?: string;
     /** Accepted alternates for verification (ffmpeg may normalize tags). */
     langAlternates?: string[];
+    /** Source format. SubRip is the default; `ass` styles its own .ass file. */
+    format?: 'srt' | 'ass';
+    /** Expected codec after muxing (verification only). */
+    expectCodec?: string;
 }
 
 interface EpisodeSpec {
@@ -76,13 +80,15 @@ const SUBS: Record<string, SubSpec> = {
     zhHans: {key: 'zh-Hans', lang: 'zh-Hans', disposition: '0', langAlternates: ['chi', 'zho']},
     zhHant: {key: 'zh-Hant', lang: 'zh-Hant', disposition: '0', langAlternates: ['chi', 'zho']},
     enUK: {key: 'en-UK', lang: 'en-UK', disposition: '0', langAlternates: ['eng']},
+    // Styled text subs (second TEXT codec). Compression is eligible here.
+    enStyled: {key: 'en-styled', lang: 'eng', title: 'English Styled', format: 'ass', expectCodec: 'ass'},
 };
 
 const EPISODES: EpisodeSpec[] = [
     {
         file: 'How Its Made s01e01.mkv', dir: VIDEO_DIR, video: 'avc',
         audio: ['flac', 'aac51', 'commentary'],
-        subs: [SUBS.eng!, SUBS.engSdh!, SUBS.engForced!, SUBS.esES!, SUBS.es419!, SUBS.zhHans!, SUBS.zhHant!, SUBS.enUK!],
+        subs: [SUBS.eng!, SUBS.engSdh!, SUBS.engForced!, SUBS.esES!, SUBS.es419!, SUBS.zhHans!, SUBS.zhHant!, SUBS.enUK!, SUBS.enStyled!],
         attachments: ['font.ttf', 'notes.txt'], chapters: true,
         title: "How It's Made - S01E01",
     },
@@ -155,6 +161,28 @@ function srt(cues: Cue[]): string {
     ).join('\n');
 }
 
+/** An ASS dialogue cue. Times are `H:MM:SS.cc` and text uses ASS override tags. */
+interface AssCue {start: string; end: string; text: string}
+
+function ass(cues: AssCue[]): string {
+    const header = [
+        '[Script Info]',
+        'ScriptType: v4.00+',
+        'Title: Styled English',
+        'PlayResX: 1920',
+        'PlayResY: 1080',
+        '',
+        '[V4+ Styles]',
+        'Format: Name, Fontname, Fontsize, PrimaryColour, Bold, Italic',
+        'Style: Default,Arial,48,&H00FFFFFF,0,0',
+        '',
+        '[Events]',
+        'Format: Layer, Start, End, Style, Text',
+    ];
+    const events = cues.map((c) => `Dialogue: 0,${c.start},${c.end},Default,${c.text}`);
+    return [...header, ...events, ''].join('\r\n');
+}
+
 function writeSubtitleAssets(): void {
     mkdirSync(SUBS_DIR, {recursive: true});
     const files: Record<string, string> = {
@@ -191,6 +219,12 @@ function writeSubtitleAssets(): void {
         'en-UK.srt': srt([
             {start: '00:00:01,000', end: '00:00:05,000', text: ['Welcome to How It\u2019s Made.']},
             {start: '00:00:06,500', end: '00:00:10,500', text: ['Today: a glass bottle factory in the Midlands.']},
+        ]),
+        // Styled text subtitles — a second TEXT codec alongside SubRip. Matroska
+        // stores ASS as S_TEXT/ASS, so the preview reports the ASS codec name.
+        'en-styled.ass': ass([
+            {start: '0:00:01.00', end: '0:00:05.00', text: 'Styled subtitle line.\\NSecond styled line.'},
+            {start: '0:00:06.50', end: '0:00:10.50', text: '\\i1Italic styled dialogue.\\i0'},
         ]),
     };
     for (const [name, content] of Object.entries(files)) {
@@ -283,12 +317,16 @@ async function assembleEpisode(spec: EpisodeSpec): Promise<void> {
         return i + 1;
     });
     let next = 1 + spec.audio.length;
-    const subIdx = spec.subs.map((sub) => {
-        args.push('-i', path.join(SUBS_DIR, `${sub.key}.srt`));
-        return next++;
-    });
-    const chaptersIdx = spec.chapters ? next++ : -1;
-    if (spec.chapters) args.push('-i', path.join(BASE_DIR, 'chapters.ffmeta'));
+    const subIdx: number[] = [];
+    for (const sub of spec.subs) {
+        args.push('-i', path.join(SUBS_DIR, `${sub.key}.${sub.format === 'ass' ? 'ass' : 'srt'}`));
+        subIdx.push(next++);
+    }
+    if (spec.chapters) {
+        args.push('-i', path.join(BASE_DIR, 'chapters.ffmeta'));
+        next++;
+    }
+    const chaptersIdx = spec.chapters ? next - 1 : -1;
 
     args.push('-map', '0:v:0');
     for (const i of audioIdx) args.push('-map', `${i}:a:0`);
@@ -415,6 +453,9 @@ function verifyEpisode(spec: EpisodeSpec): void {
             problems.push(`sub ${i} language '${s.language}' not in [${accepted.join(', ')}]`);
         }
         if (sub.title && !s.meta.includes(sub.title.toLowerCase())) problems.push(`sub ${i} missing title '${sub.title}' (meta:${s.meta.trim()})`);
+        if (sub.expectCodec && !s.codec.includes(sub.expectCodec)) {
+            problems.push(`sub ${i} codec '${s.codec}' != expected '${sub.expectCodec}'`);
+        }
         // ffmpeg's dump renders dispositions human-readable:
         // "hearing_impaired" → "(hearing impaired)".
         if (sub.disposition && sub.disposition !== '0'

@@ -98,10 +98,30 @@ rule:
   <img src="../media/screenshots/light/source/modify-delay.avif" alt="Modify rule with a 250 millisecond delay">
 </picture>
 
+#### zlib compression
+
+Subtitle rules also carry a **Compression** toggle. It is **on by default** and compresses the track with zlib when muxing, which noticeably shrinks text subtitle. It applies **only to text-based subtitles** (SubRip, ASS/SSA, WebVTT). Bitmap subtitles such as PGS and VoBSub are already compressed, so the option is skipped for them.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../media/screenshots/dark/source/modify-compression.avif">
+  <img src="../media/screenshots/light/source/modify-compression.avif" alt="Subtitle modify rule with the zlib compression toggle enabled">
+</picture>
+
+Compression is applied by `mkvmerge` after the mux finishes, so it only takes
+effect on files you actually mux — it is not visible in the preview.
+
 ### Preprocess
 
-**Preprocess** options run before muxing (Opus encoding settings here): set
-**Bitrate** `160` and **Downmix** *stereo* on the AAC 5.1 rule:
+**Preprocess** options run before muxing. For audio they drive the bundled
+`opusenc`: **Bitrate**, **Downmix** (stereo/mono), **Complexity**, and
+**Frame Size (ms)**, plus **Volume Workaround** and **Normalize**:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../media/screenshots/dark/source/opusenc-preprocess.avif">
+  <img src="../media/screenshots/light/source/opusenc-preprocess.avif" alt="Opusenc preprocessing options on an audio rule">
+</picture>
+
+A simpler case — **Bitrate** `160` with **Downmix** *stereo* on the AAC 5.1 rule:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../media/screenshots/dark/source/preprocess.avif">
@@ -154,6 +174,23 @@ clicking keeps the stream out of the output for that file:
   <source media="(prefers-color-scheme: dark)" srcset="../media/screenshots/dark/source/disable-track.avif">
   <img src="../media/screenshots/light/source/disable-track.avif" alt="Tooltip offering to exclude a track">
 </picture>
+
+Clicking swaps the green ✓ for a 🛇 shield, marking the row as excluded:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../media/screenshots/dark/source/exclude-subtitle-track.avif">
+  <img src="../media/screenshots/light/source/exclude-subtitle-track.avif" alt="Subtitle track excluded, shown with a shield badge">
+</picture>
+
+Clicking the shield again re-includes it and restores the ✓:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../media/screenshots/dark/source/exclude-subtitle-restored.avif">
+  <img src="../media/screenshots/light/source/exclude-subtitle-restored.avif" alt="Subtitle track re-included with the green check restored">
+</picture>
+
+Note that excluding is per-episode: the same stream can be excluded in one
+episode's queue without affecting the others.
 
 ## Related
 

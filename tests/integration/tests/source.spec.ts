@@ -275,6 +275,27 @@ test.describe('Source', () => {
         ).toHaveValue('250');
         await capture(page, 'source/modify-delay');
 
+        // ── 19b. modify-compression — zlib toggle on a SUBTITLE rule ──
+        // The seeded tlh rule matches no stream, but the Modify panel is
+        // per-rule metadata and renders regardless of matching, so the toggle
+        // is reachable here. Compressing only happens at mux time.
+        const compressRow = subItem.locator('div:has(> label:text-is("Compression"))');
+        await expect(compressRow).toBeVisible();
+        const compressSwitch = compressRow.locator('button[role="switch"]');
+        // On by default — Matroska ContentEncodings apply to text subtitles.
+        await expect(compressSwitch).toHaveAttribute('aria-checked', 'true');
+        await capture(page, 'source/modify-compression');
+        // The Info tooltip explains the text-only scope.
+        await hoverTooltip(
+            page,
+            compressRow.locator('button[aria-label="About subtitle compression"]'),
+            'text-based subtitles',
+        );
+        await page.mouse.move(0, 0);
+        // Toggling off must persist into the rule's JSON.
+        await compressSwitch.click();
+        await expect(compressSwitch).toHaveAttribute('aria-checked', 'false');
+
         // ── 20. disable-subtitle — tlh rule matches nothing (red) ──
         await openSection(page, subItem, 'Filter');
         // Rows render the field as a native <select> — the seeded row is Language=tlh.
