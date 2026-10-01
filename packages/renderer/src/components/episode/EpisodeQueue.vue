@@ -87,8 +87,6 @@ interface EpisodeQueueItemData {
     additionalSources?: { sourceFile: string; sourceDirectory: string; sourceIndex: number }[];
     enabled: boolean;
     status: EpisodeStatus;
-    progress: number;
-    currentStep: string;
     streamCounts: { video: number; audio: number; subtitle: number; attachment: number };
     tracks: TrackConfigItem[];
     outputFilenamePreview?: string;
@@ -431,7 +429,7 @@ async function rebuildEpisodes() {
                 const item: EpisodeQueueItemData = {
                     id, seasonNumber: finalSeason, episodeNumber: finalEpisode, title: '',
                     sourceFile: file, sourceDirectory: source.directory, sourceIndex: sourceIdx,
-                    enabled: true, status, progress: 0, currentStep: '',
+                    enabled: true, status,
                     streamCounts: { video: 0, audio: 0, subtitle: 0, attachment: 0 },
                     tracks: [], outputFilenamePreview: undefined,
                     matchedVideo: 0, matchedAudio: 0, matchedSubtitle: 0, matchedAttachment: 0,
@@ -450,7 +448,7 @@ async function rebuildEpisodes() {
                 rows.push({
                     id: `${source.directory}::(empty)`, seasonNumber: 1, episodeNumber: 0, title: '',
                     sourceFile: '(no files loaded)', sourceDirectory: source.directory, sourceIndex: sourceIdx,
-                    enabled: true, status: 'pending' as EpisodeStatus, progress: 0, currentStep: '',
+                    enabled: true, status: 'pending',
                     streamCounts: { video: 0, audio: 0, subtitle: 0, attachment: 0 },
                     tracks: [], outputFilenamePreview: undefined,
                     matchedVideo: 0, matchedAudio: 0, matchedSubtitle: 0, matchedAttachment: 0,

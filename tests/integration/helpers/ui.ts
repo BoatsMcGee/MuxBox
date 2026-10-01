@@ -53,13 +53,14 @@ export function queueItem(page: Page, badge: string): Locator {
     return page.locator('div.border-b').filter({hasText: badge}).first();
 }
 
-/** Wait until the queue finished probing S01E01: the status badge leaves
- *  'loading' and the stream-count pill shows the probed total
- *  (aria-label "Video: 1 stream" from getStreamTypeTooltip, variant total). */
+/** Wait until the queue finished probing S01E01: the episode badge stops
+ *  reporting loading (data-episode-loading) and the stream-count pill shows the
+ *  probed total (aria-label "Video: 1 stream" from getStreamTypeTooltip,
+ *  variant total). */
 export async function waitForQueueReady(page: Page): Promise<void> {
     const item = queueItem(page, 'S01E01');
     await expect(item).toBeVisible();
-    await expect(item.getByText('loading', {exact: true})).toHaveCount(0);
+    await expect(item.locator('[data-episode-loading="true"]')).toHaveCount(0);
     await expect(item.locator('[aria-label="Video: 1 stream"]')).toBeVisible();
 }
 

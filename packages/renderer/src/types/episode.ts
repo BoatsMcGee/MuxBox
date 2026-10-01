@@ -1,4 +1,10 @@
-export type EpisodeStatus = 'loading' | 'pending' | 'unassigned' | 'processing' | 'completed' | 'error' | 'skipped';
+/**
+ * Static lifecycle of a queue row, derived from source probing.
+ *
+ * Live muxing state (preprocessing/muxing/completed/error/skipped) is NOT here —
+ * it lives in the episode queue store's ProcessingStatus and is read per-row.
+ */
+export type EpisodeStatus = 'loading' | 'pending' | 'unassigned' | 'error';
 
 export interface TrackProgress {
     packetsWritten: number;
