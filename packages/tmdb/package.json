@@ -16,6 +16,6 @@
     },
     "scripts": {},
     "dependencies": {
-        "@api-wrappers/tmdb-wrapper": "^2.0.1"
+        "@api-wrappers/tmdb-wrapper": "^3.0.0"
     }
 }
