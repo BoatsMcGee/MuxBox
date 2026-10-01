@@ -23,6 +23,24 @@ export function monacoThemeName(): MonacoThemeName {
     return document.documentElement.classList.contains('dark') ? 'vs-dark' : 'vs';
 }
 
+/**
+ * Watch the `.dark` class itself and keep Monaco in step.
+ *
+ * `applyTheme()` already calls syncMonacoTheme(), but the class is the real
+ * source of truth — code that flips it directly (the screenshot harness does)
+ * would otherwise leave live editors on the previous theme. Observing the class
+ * means every path stays consistent.
+ */
+function observeThemeClass(): void {
+    const root = document.documentElement;
+    new MutationObserver(() => syncMonacoTheme()).observe(root, {
+        attributes: true,
+        attributeFilter: ['class'],
+    });
+}
+
+observeThemeClass();
+
 /** Push the current theme to every live editor. No-op before one registers. */
 export function syncMonacoTheme(): void {
     themeSetter?.(monacoThemeName());

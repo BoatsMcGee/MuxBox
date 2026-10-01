@@ -70,6 +70,18 @@ describe('monaco-theme', () => {
             expect(setter).toHaveBeenCalledWith('vs-dark');
         });
 
+        it('follows the .dark class without an explicit sync (screenshot harness)', async () => {
+            // The screenshot harness toggles .dark directly instead of going
+            // through the settings store, so the observer must catch it.
+            registerMonacoThemeSetter(setter);
+            setter.mockClear();
+
+            document.documentElement.classList.add('dark');
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+            expect(setter).toHaveBeenCalledWith('vs-dark');
+        });
+
         it('pushes back to the light theme when dark mode is turned off', () => {
             document.documentElement.classList.add('dark');
             registerMonacoThemeSetter(setter);
