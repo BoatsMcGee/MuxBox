@@ -82,10 +82,13 @@ export class AutoUpdater implements AppModule {
                     return null;
                 }
 
-                // The GitHub releases feed answers 404 while the repository
-                // or its releases do not exist yet — nothing to update from.
-                if (('code' in error && error.code === 'HTTP_ERROR_404')
-                    || error.message.includes('HTTP Error: 404')) {
+                // The GitHub releases feed answers 404 while the repository does
+                // not exist and 406 while it has no published release — both
+                // mean the same thing here: nothing to update from.
+                if (('code' in error
+                        && (error.code === 'HTTP_ERROR_404' || error.code === 'HTTP_ERROR_406'))
+                    || error.message.includes('HTTP Error: 404')
+                    || error.message.includes('HttpError: 406')) {
                     return null;
                 }
 
@@ -102,7 +105,10 @@ export class AutoUpdater implements AppModule {
                 }
             }
 
-            throw error;
+            // Log and continue so application startup does not fail
+            console.error('Update check failed:', error);
+
+            return null;
         }
     }
 

@@ -105,16 +105,55 @@ describe('AutoUpdater.runAutoUpdater', () => {
         await expect(new AutoUpdater(packagedWin).runAutoUpdater()).resolves.toBeNull();
     });
 
-    it('rethrows unexpected updater errors', async () => {
-        checkForUpdatesAndNotify.mockRejectedValue(new Error('network down'));
+    it('swallows a 406 releases feed (no published release to update from)', async () => {
+        const notAcceptable = Object.assign(new Error(
+            'Cannot parse releases feed: Error: Unable to find latest version on GitHub '
+                + '(https://github.com/BoatsMcGee/MuxBox/releases/latest), '
+                + 'please ensure a production release exists: HttpError: 406',
+        ), {
+            code: 'HTTP_ERROR_406',
+        });
+        checkForUpdatesAndNotify.mockRejectedValue(notAcceptable);
 
-        await expect(new AutoUpdater(packagedWin).runAutoUpdater()).rejects.toThrow('network down');
+        await expect(new AutoUpdater(packagedWin).runAutoUpdater()).resolves.toBeNull();
     });
 
-    it('rethrows ENOENT for other missing files', async () => {
-        checkForUpdatesAndNotify.mockRejectedValue(enoent('P:/app/resources/other.yml'));
+    it('swallows a 406 surfaced only through the message', async () => {
+        checkForUpdatesAndNotify.mockRejectedValue(
+            new Error('Unable to find latest version on GitHub: HttpError: 406'),
+        );
 
-        await expect(new AutoUpdater(packagedWin).runAutoUpdater()).rejects.toThrow(/ENOENT/);
+        await expect(new AutoUpdater(packagedWin).runAutoUpdater()).resolves.toBeNull();
+    });
+
+    it('logs instead of rejecting on unexpected updater errors', async () => {
+        const error = new Error('network down');
+        checkForUpdatesAndNotify.mockRejectedValue(error);
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        await expect(new AutoUpdater(packagedWin).runAutoUpdater()).resolves.toBeNull();
+
+        expect(consoleError).toHaveBeenCalledWith('Update check failed:', error);
+        consoleError.mockRestore();
+    });
+
+    it('logs instead of rejecting for other missing files', async () => {
+        checkForUpdatesAndNotify.mockRejectedValue(enoent('P:/app/resources/other.yml'));
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        await expect(new AutoUpdater(packagedWin).runAutoUpdater()).resolves.toBeNull();
+
+        expect(consoleError).toHaveBeenCalledTimes(1);
+        consoleError.mockRestore();
+    });
+
+    it('never lets a failed update check reject enable()', async () => {
+        checkForUpdatesAndNotify.mockRejectedValue(new Error('GitHub unreachable'));
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        await expect(new AutoUpdater(packagedWin).enable()).resolves.toBeUndefined();
+
+        consoleError.mockRestore();
     });
 
     it('does nothing in unpackaged dev sessions', async () => {
