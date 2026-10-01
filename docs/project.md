@@ -53,6 +53,10 @@ and then restored with **Redo** after an **Undo**:
 The template that turns each episode's parsed name into the final filename.
 Click **Edit** next to the template to enter edit mode: an editable template
 text, a live **Example Preview**, and cards explaining every available field.
+A template to use as the starting point for new projects can be set once in
+[Settings → Default Rename Template](settings.md#default-rename-template); a
+project created afterwards starts from a copy of it, and the template here
+stays independent from then on.
 
 ## TMDB series search
 

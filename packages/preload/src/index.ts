@@ -1,6 +1,6 @@
 import { sha256sum } from './nodeCrypto.js';
 import { versions } from './versions.js';
-import { createDefaultProjectData } from './types.js';
+import { createDefaultProjectData, DEFAULT_RENAME_TEMPLATE, DEFAULT_RENAME_FIELD_CONFIG } from './types.js';
 import type { ProjectData } from './types.js';
 import {
     listProjects as listProjectsFs,
@@ -37,7 +37,7 @@ import { getStreamTracks } from '@app/mediainfo';
 
 // ─── Types ────────────────────────────────────────────────────────
 
-export type { ProjectData, ProjectListItem, FieldConfig, MuxerMuxOptions, MuxerSource } from './types.js';
+export type { ProjectData, ProjectListItem, FieldConfig, MuxerMuxOptions, MuxerSource, DefaultProjectOptions } from './types.js';
 // Re-export everything consumers need — includes both locally-used types and pure passthrough re-exports.
 // Types only re-exported (TrackComparison, Multiplexer, etc.) are never imported locally,
 // avoiding TS6133 "declared but never used" warnings.
@@ -54,7 +54,7 @@ export type {
     CodecConstants,
     CodecEntry,
 } from '@app/muxer';
-export { createDefaultProjectData };
+export { createDefaultProjectData, DEFAULT_RENAME_TEMPLATE, DEFAULT_RENAME_FIELD_CONFIG };
 
 import { ipcRenderer } from 'electron';
 

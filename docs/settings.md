@@ -1,8 +1,9 @@
 # Settings
 
-Settings configures MuxBox globally: TMDB access, appearance, and how files
-are multiplexed. Open it from the gear button on the [Home](home.md) page.
-Click **← Back** in the header to return.
+Settings configures MuxBox globally: TMDB access, appearance, how files are
+multiplexed, and the [rename template](#default-rename-template) new projects
+start with. Open it from the gear button on the [Home](home.md) page. Click
+**← Back** in the header to return.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../media/screenshots/dark/settings.avif">
@@ -24,6 +25,24 @@ The API token used for series lookups ([Project → TMDB search](project.md#tmdb
 Three buttons: **Light**, **Dark**, **Auto**. The selection applies
 immediately after saving and controls whether MuxBox renders with the light
 or dark palette (*Auto* follows your operating system setting).
+
+## Default Rename Template
+
+The rename template each new project starts with, so a preferred naming
+convention only has to be set up once.
+
+- The editor is the same one used on the
+  [project page](project.md#rename-template) — click **Edit** to expand the
+  template field, the **Example Preview**, and the per-field cards for prefix,
+  suffix, always-add, and padding.
+- When a project is created it **copies** this template and its field settings,
+  so the project then has its own copy and is not tied to this setting.
+- Projects you already have keep the template they are using — changing the
+  default here never rewrites them. Edit an existing project's template on the
+  project page.
+- A template left blank falls back to the built-in
+  `{Series} - S##E## - {Name}` with `S`/`E` prefixes, so a cleared field can
+  never produce an empty filename.
 
 ## Multiplexer
 

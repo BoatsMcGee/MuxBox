@@ -14,7 +14,7 @@ screenshots always match the current UI.
 | [Episode Queue](episode-queue.md) | Episode rows, tracks, container, chapters, tooltips | 7 |
 | [Source](source.md) | Add/Edit Source, match pattern, capture groups, metadata & chapters copying | 8 |
 | [Stream Match Preview](stream-match-preview.md) | Stream Configuration builder, filters, modify & preprocess rules, preview states | 15 |
-| [Settings](settings.md) | TMDB token, theme, multiplexer method, concurrency | 1 |
+| [Settings](settings.md) | TMDB token, theme, default rename template, multiplexer method, concurrency | 1 |
 
 ## Screenshots
 

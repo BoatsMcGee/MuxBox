@@ -4,6 +4,7 @@ import { TooltipRoot, TooltipTrigger, TooltipContent } from 'reka-ui';
 import { DialogRoot, DialogContent, DialogTitle, DialogDescription, DialogClose } from 'reka-ui';
 import { useRouter, useRoute } from 'vue-router';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useSettingsStore } from '@/stores/useSettingsStore';
 import { listProjects, saveProject, removeProject } from '@app/preload';
 import { createDefaultProjectData } from '@app/preload';
 import type { ProjectListItem } from '@app/preload';
@@ -12,6 +13,7 @@ import { Settings, Trash2 } from '@lucide/vue';
 const router = useRouter();
 const route = useRoute();
 const projectsStore = useProjectsStore();
+const settingsStore = useSettingsStore();
 
 const sortedProjects = computed(() =>
     [...projectsStore.projects].sort((a, b) => b.lastOpened - a.lastOpened),
@@ -48,8 +50,14 @@ async function confirmDeleteProject() {
 }
 
 async function createProject() {
+    // The rename default lives in global settings, so it must be resolved
+    // before the project data is built. Loading is a no-op once done.
+    await settingsStore.load();
     const id = crypto.randomUUID();
-    const data = createDefaultProjectData(id);
+    const data = createDefaultProjectData(id, {
+        renameTemplate: settingsStore.resolvedDefaultRenameTemplate,
+        fieldConfig: settingsStore.resolvedDefaultRenameFieldConfig,
+    });
     const item: ProjectListItem = {
         id: data.id,
         name: data.name,

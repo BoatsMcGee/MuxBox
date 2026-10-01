@@ -3,8 +3,9 @@ import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useSettingsStore } from '@/stores/useSettingsStore';
 import { openDirectoryDialog } from '@app/preload';
-import type { Multiplexer, NativeMultiplexer, FFmpegMultiplexer } from '@app/preload';
+import type { Multiplexer, NativeMultiplexer, FFmpegMultiplexer, FieldConfig } from '@app/preload';
 import { type ThemeMode } from '@app/settings';
+import RenameTemplateModal from '@/components/rename/RenameTemplateModal.vue';
 
 const router = useRouter();
 const settingsStore = useSettingsStore();
@@ -13,6 +14,9 @@ const token = ref('');
 const selectedTheme = ref<ThemeMode>('auto');
 const multiplexerMethod = ref<Multiplexer>({ keepNegativePackets: false, clipTimestamps: false });
 const muxingConcurrency = ref<number | undefined>(undefined);
+const renameTemplate = ref('');
+const renameFieldConfig = ref<Record<string, FieldConfig>>({});
+const showRenameModal = ref(false);
 const saving = ref(false);
 const saved = ref(false);
 
@@ -25,6 +29,8 @@ onMounted(async () => {
     selectedTheme.value = settingsStore.theme;
     multiplexerMethod.value = { ...settingsStore.multiplexerMethod };
     muxingConcurrency.value = settingsStore.muxingConcurrency;
+    renameTemplate.value = settingsStore.defaultRenameTemplate;
+    renameFieldConfig.value = JSON.parse(JSON.stringify(settingsStore.defaultRenameFieldConfig)) as Record<string, FieldConfig>;
 });
 
 function setNative() {
@@ -52,6 +58,7 @@ async function handleSave() {
         await settingsStore.setTheme(selectedTheme.value);
         await settingsStore.setMultiplexerMethod(multiplexerMethod.value);
         await settingsStore.setMuxingConcurrency(muxingConcurrency.value);
+        await settingsStore.setDefaultRename(renameTemplate.value, renameFieldConfig.value);
         saved.value = true;
         setTimeout(() => { saved.value = false; }, 2000);
     } finally {
@@ -102,6 +109,33 @@ const themeOptions: { value: ThemeMode; label: string }[] = [
                                 : 'bg-background hover:bg-accent'" @click="selectedTheme = opt.value">
                             {{ opt.label }}
                         </button>
+                    </div>
+                </section>
+
+                <!-- Default Rename Template -->
+                <section class="space-y-4">
+                    <h2 class="text-lg font-semibold">Default Rename Template</h2>
+                    <div class="space-y-2">
+                        <label class="block text-sm font-medium">Template for new projects</label>
+                        <div class="rounded-md border border-input bg-background px-3 py-2 text-sm">
+                            <RenameTemplateModal
+                                :open="showRenameModal"
+                                :template="renameTemplate"
+                                :field-config="renameFieldConfig"
+                                @open="showRenameModal = true"
+                                @close="showRenameModal = false"
+                                @save="(template: string, fieldConfig: Record<string, FieldConfig>) => {
+                                    renameTemplate = template;
+                                    renameFieldConfig = fieldConfig;
+                                    showRenameModal = false;
+                                }"
+                            />
+                        </div>
+                        <p class="text-xs text-muted-foreground">
+                            New projects copy this template and its field settings when they are created.
+                            Projects you already have keep their own template, and changing this later never
+                            rewrites them. Edit it on the project page to change an existing project.
+                        </p>
                     </div>
                 </section>
 

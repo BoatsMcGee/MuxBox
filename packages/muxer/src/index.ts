@@ -13,6 +13,7 @@ export type {
     FFmpegMultiplexer,
     Episode,
     MuxerModel,
+    FieldConfig,
 } from './episode/types.js';
 export type { PerTrackModifier } from './selector/index.js';
 export { EpisodeMuxer } from './episode/muxer.js';

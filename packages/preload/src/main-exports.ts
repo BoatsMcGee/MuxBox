@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { app } from 'electron';
-import type { Multiplexer } from '@app/muxer';
+import type { Multiplexer, FieldConfig } from '@app/muxer';
 
 type ThemeMode = 'light' | 'dark' | 'auto';
 
@@ -17,6 +17,10 @@ interface AppSettings {
     multiplexerMethod?: Multiplexer;
     /** Maximum number of concurrent muxing operations. Defaults to CPU cores - 1. */
     muxingConcurrency?: number;
+    /** Rename template copied into a new project's `rename.template` at creation time. */
+    defaultRenameTemplate?: string;
+    /** Rename field config copied into a new project's `rename.fieldConfig` at creation time. */
+    defaultRenameFieldConfig?: Record<string, FieldConfig>;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -29,6 +33,8 @@ const DEFAULT_SETTINGS: AppSettings = {
     windowIsMaximized: false,
     multiplexerMethod: { keepNegativePackets: false, clipTimestamps: false },
     muxingConcurrency: undefined,
+    defaultRenameTemplate: undefined,
+    defaultRenameFieldConfig: undefined,
 };
 
 let _userDataPath: string | null = null;

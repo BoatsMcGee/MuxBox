@@ -59,7 +59,40 @@ export interface ProjectListItem {
     lastOpened: number;
     createdAt: number;
 }
-export function createDefaultProjectData(id: string): ProjectData {
+
+/** Built-in rename template used when no global default is configured. */
+export const DEFAULT_RENAME_TEMPLATE = '{{SERIES_NAME}} - {{SEASON_NUMBER}}{{EPISODE_NUMBER}} - {{EPISODE_NAME}}';
+
+/** Built-in rename field config used when no global default is configured. */
+export const DEFAULT_RENAME_FIELD_CONFIG: Record<string, FieldConfig> = {
+    '{{SEASON_NUMBER}}': { prefix: 'S', suffix: '', alwaysAdd: false },
+    '{{EPISODE_NUMBER}}': { prefix: 'E', suffix: '', alwaysAdd: false },
+};
+
+export interface DefaultProjectOptions {
+    /** Overrides the built-in rename template. Blank values fall back to `DEFAULT_RENAME_TEMPLATE`. */
+    renameTemplate?: string;
+    /** Overrides the built-in rename field config. */
+    fieldConfig?: Record<string, FieldConfig>;
+}
+
+/**
+ * Copy a field config record one level deeper than a spread.
+ * The per-tag `FieldConfig` objects are shared with the caller (settings) and
+ * with the module-level defaults, so a project must never hold those exact
+ * references — a later prefix/padding edit in the editor would otherwise
+ * rewrite the global default and every other project.
+ */
+function cloneFieldConfig(config: Record<string, FieldConfig>): Record<string, FieldConfig> {
+    return Object.fromEntries(
+        Object.entries(config).map(([tag, cfg]) => [tag, { ...cfg }]),
+    );
+}
+
+export function createDefaultProjectData(id: string, options?: DefaultProjectOptions): ProjectData {
+    const template = options?.renameTemplate?.trim()
+        ? options.renameTemplate
+        : DEFAULT_RENAME_TEMPLATE;
     return {
         id,
         name: 'New Project',
@@ -67,11 +100,8 @@ export function createDefaultProjectData(id: string): ProjectData {
         seasonNames: { 0: 'Specials' },
         rename: {
             enabled: true,
-            template: '{{SERIES_NAME}} - {{SEASON_NUMBER}}{{EPISODE_NUMBER}} - {{EPISODE_NAME}}',
-            fieldConfig: {
-                '{{SEASON_NUMBER}}': { prefix: 'S', suffix: '', alwaysAdd: false },
-                '{{EPISODE_NUMBER}}': { prefix: 'E', suffix: '', alwaysAdd: false },
-            },
+            template,
+            fieldConfig: cloneFieldConfig(options?.fieldConfig ?? DEFAULT_RENAME_FIELD_CONFIG),
         },
         muxOptions: {
             overwrite: false,
