@@ -7,5 +7,7 @@ export type { ParsedChapter } from './chapters.js';
 
 export { mkvmergeChapters, buildMkvmergeChaptersArgs } from './remux.js';
 
+export { isTextBasedSubtitleTrack, getCompressibleSubtitleTrackIds } from './compression.js';
+
 export { resolveTool } from './resolve-tool.js';
 export type { ResolveToolOptions } from './resolve-tool.js';

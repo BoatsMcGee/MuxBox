@@ -303,7 +303,7 @@ export async function processEpisode(
                 delay: source.chapters?.delay,
             }));
 
-    await mkvmergeChapters(filePath, chaptersSources);
+    await mkvmergeChapters(filePath, chaptersSources, episodeMuxer.compressibleSubtitleTrackIds);
 
     episodeMuxer.emit('mkvmerge:complete', {
         fileName,

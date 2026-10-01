@@ -139,7 +139,7 @@ async function run(): Promise<void> {
             return;
         }
 
-        // Phase 3: Post-process with mkvmerge (chapters)
+        // Phase 3: Post-process with mkvmerge (chapters + subtitle compression)
         const filePath = path.resolve(episode.file.directory, `${fileName}.mkv`);
         const chaptersSources = episode.chaptersSource
             ? [{ path: path.resolve(episode.chaptersSource.directory, episode.chaptersSource.fileName), delay: episode.chaptersSource.delay }]
@@ -149,8 +149,11 @@ async function run(): Promise<void> {
                     path: path.resolve(source.file.directory, source.file.name),
                     delay: source.chapters?.delay,
                 }));
-        if (chaptersSources.length > 0) {
-            await mkvmergeChapters(filePath, chaptersSources);
+        // Also run when there are no chapters, so subtitle zlib compression still
+        // happens — mkvmerge is the only component that can apply it.
+        const compressTrackIds = epMuxer.compressibleSubtitleTrackIds;
+        if (chaptersSources.length > 0 || compressTrackIds.length > 0) {
+            await mkvmergeChapters(filePath, chaptersSources, compressTrackIds);
         }
 
         post({ type: 'complete', fileName, snapshot: finalSnapshot });

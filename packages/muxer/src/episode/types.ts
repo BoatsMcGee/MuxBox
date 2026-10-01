@@ -79,6 +79,11 @@ export interface SubtitleModify {
     };
     /** Delay in milliseconds */
     delay?: number;
+    /**
+     * Force zlib compression on the track. Defaults to true when omitted.
+     * Only applied to text-based subtitle codecs; bitmap subs are unaffected.
+     */
+    compress?: boolean;
 }
 
 export interface StreamMatch {
@@ -169,6 +174,8 @@ export interface Episode {
             delay?: number;
             disposition?: Record<string, boolean>;
             tags?: Record<string, string>;
+            /** Overrides `modify.compress` for this track. Undefined means "inherit". */
+            compress?: boolean;
         }>;
         /** Excluded track indices (stream indices) that are skipped during muxing. */
         excludedTracks?: number[];

@@ -82,3 +82,56 @@ describe('buildMkvmergeChaptersArgs', () => {
         );
     });
 });
+
+describe('buildMkvmergeChaptersArgs — subtitle compression', () => {
+    it('places --compression BEFORE the muxed file path', () => {
+        // mkvmerge applies per-track options to the *following* input file, so a
+        // --compression flag emitted after the path would be silently ignored.
+        const args = buildMkvmergeChaptersArgs('out/ep01.mkv', [], [2]);
+
+        const compIdx = args.indexOf('--compression');
+        const fileIdx = args.indexOf('out/ep01.mkv');
+
+        expect(compIdx).toBeGreaterThan(-1);
+        expect(fileIdx).toBeGreaterThan(-1);
+        expect(compIdx).toBeLessThan(fileIdx);
+    });
+
+    it('emits one TID:zlib flag per requested track', () => {
+        const args = buildMkvmergeChaptersArgs('out/ep01.mkv', [], [0, 3, 7]);
+
+        const flags = args.filter((a) => a === '--compression');
+        expect(flags).toHaveLength(3);
+
+        const values = args
+            .map((a, i) => (a === '--compression' ? args[i + 1] : undefined))
+            .filter((v): v is string => v !== undefined);
+
+        expect(values).toEqual(['0:zlib', '3:zlib', '7:zlib']);
+    });
+
+    it('emits no --compression when the track list is empty', () => {
+        const args = buildMkvmergeChaptersArgs('out/ep01.mkv', [], []);
+        expect(args).not.toContain('--compression');
+    });
+
+    it('emits no --compression when the track list is undefined', () => {
+        const args = buildMkvmergeChaptersArgs('out/ep01.mkv', [], undefined);
+        expect(args).not.toContain('--compression');
+    });
+
+    it('still supports chapters alongside compression', () => {
+        const args = buildMkvmergeChaptersArgs(
+            'out/ep01.mkv',
+            [{ path: 'src/ep01.mkv', delay: -1000 }],
+            [1],
+        );
+
+        expect(args).toContain('--compression');
+        expect(args).toContain('1:zlib');
+        // --chapter-sync must still precede its own chapters source.
+        expect(args.indexOf('--chapter-sync')).toBeLessThan(args.indexOf('src/ep01.mkv'));
+        // Both options apply to the first (muxed) input.
+        expect(args.indexOf('--compression')).toBeLessThan(args.indexOf('out/ep01.mkv'));
+    });
+});

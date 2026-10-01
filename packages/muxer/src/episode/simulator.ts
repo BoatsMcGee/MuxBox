@@ -39,7 +39,6 @@ import { applyStreamModify } from '../modifier/index.js';
 import { extractInfoStreamProperties, simulatePreprocessEffect } from './stream-props.js';
 import { getCodecName } from '../ffmpeg/codec-names.js';
 import { getDispositionName } from '../ffmpeg/dispositions.js';
-import { ALL_DISPOSITIONS } from '../sorter/index.js';
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -298,6 +297,10 @@ function buildComparisons(streams: SimulatedStream[]): TrackComparison[] {
                 muxedMimetype: s.muxedMimetype,
                 muxedMetadata: { ...s.muxedMetadata },
                 muxedDelay: s.muxedDelay ?? 0,
+                // Mirrors the real muxer: subtitle compression defaults to on.
+                ...(type === 'subtitle' && {
+                    muxCompress: (s.modify as SubtitleModify | undefined)?.compress ?? true,
+                }),
             });
         }
     }
@@ -332,60 +335,6 @@ function extractSelectors(
     };
 }
 
-// ─── Queue overrides application ────────────────────────────
-
-/**
- * Apply queueTrackOverrides to the simulated streams.
- * Overrides replace the muxed metadata/dispositions for matching streams.
- */
-function applyQueueOverrides(
-    streams: SimulatedStream[],
-    queueOverrides: Record<string, { title?: string; language?: string; disposition?: Record<string, boolean>; tags?: Record<string, string>; delay?: number }> | undefined,
-): void {
-    if (!queueOverrides) return;
-
-    for (const [stableKey, mod] of Object.entries(queueOverrides)) {
-        // stableKey = "demuxerMapKey:originalIndex"
-        const lastColon = stableKey.lastIndexOf(':');
-        if (lastColon <= 0) continue;
-        const mapKey = stableKey.slice(0, lastColon);
-        const originalIdx = Number(stableKey.slice(lastColon + 1));
-
-        const stream = streams.find(s => s.demuxerMapKey === mapKey && s.originalIndex === originalIdx);
-        if (!stream) continue;
-
-        if (mod.title !== undefined) {
-            if (mod.title === '') delete stream.muxedMetadata['title'];
-            else stream.muxedMetadata['title'] = mod.title;
-        }
-        if (mod.language !== undefined) {
-            if (mod.language === '') delete stream.muxedMetadata['language'];
-            else stream.muxedMetadata['language'] = mod.language;
-        }
-        if (mod.disposition) {
-            for (const [dispKey, enabled] of Object.entries(mod.disposition)) {
-                const flag = Number(dispKey);
-                if (enabled) {
-                    if (!stream.muxedDispositions.includes(flag)) {
-                        stream.muxedDispositions.push(flag);
-                    }
-                } else {
-                    stream.muxedDispositions = stream.muxedDispositions.filter(d => d !== flag);
-                }
-            }
-        }
-        if (mod.tags) {
-            for (const [key, value] of Object.entries(mod.tags)) {
-                if (value === '') delete stream.muxedMetadata[key];
-                else stream.muxedMetadata[key] = value;
-            }
-        }
-        if (mod.delay !== undefined) {
-            stream.muxedDelay = mod.delay;
-        }
-    }
-}
-
 // ─── Main entry point ───────────────────────────────────────
 
 /**
@@ -399,7 +348,7 @@ function applyQueueOverrides(
 export function buildEpisodeModel(
     episode: Episode,
     streamInfoMap: ReadonlyMap<string, StreamInfo[]>,
-    _queueOverrides?: Record<string, Record<string, { title?: string; language?: string; disposition?: Record<string, boolean>; tags?: Record<string, string>; delay?: number }>>,
+    _queueOverrides?: Record<string, PerTrackModifier>,
 ): MuxerModel {
     const allSimulatedStreams: SimulatedStream[] = [];
     const allStreamInfos: StreamInfo[] = [];
@@ -426,45 +375,54 @@ export function buildEpisodeModel(
  * Apply queue-level track overrides to an existing MuxerModel's comparisons.
  * This is called separately after buildEpisodeModel() since the caller
  * has the episode ID needed to look up the override block.
+ *
+ * Overrides are applied directly to the comparisons. Mutating the comparisons in place keeps every field intact.
  */
 export function applyOverridesToModel(
     model: MuxerModel,
-    queueOverrides: Record<string, { title?: string; language?: string; disposition?: Record<string, boolean>; tags?: Record<string, string>; delay?: number }> | undefined,
+    queueOverrides: Record<string, PerTrackModifier> | undefined,
 ): MuxerModel {
     if (!queueOverrides) return model;
 
-    // Reconstruct simulated streams from comparisons
-    const simStreams: SimulatedStream[] = model.comparisons.map(c => ({
-        demuxerMapKey: c.demuxerMapKey,
-        originalIndex: c.originalIndex,
-        originalCodec: undefined,
-        originalMetadata: {},
-        originalDispositions: [],
-        muxedCodecName: c.muxedCodec,
-        muxedCodecId: 0 as AVCodecID,
-        muxedMetadata: c.muxedMetadata ? { ...c.muxedMetadata } : {
-            ...(c.muxedTitle ? { title: c.muxedTitle } : {}),
-            ...(c.muxedLanguage ? { language: c.muxedLanguage } : {}),
-            ...(c.muxedFilename ? { filename: c.muxedFilename } : {}),
-            ...(c.muxedMimetype ? { mimetype: c.muxedMimetype } : {}),
-        },
-        muxedDispositions: c.muxedDispositions.map(name => {
-            // Map back from name to numeric — iterate ALL_DISPOSITIONS
-            for (const d of ALL_DISPOSITIONS) {
-                if (getDispositionName(d) === name) return Number(d);
+    for (const [stableKey, mod] of Object.entries(queueOverrides)) {
+        // stableKey = "demuxerMapKey:originalIndex"
+        const lastColon = stableKey.lastIndexOf(':');
+        if (lastColon <= 0) continue;
+        const mapKey = stableKey.slice(0, lastColon);
+        const originalIdx = Number(stableKey.slice(lastColon + 1));
+
+        const comp = model.comparisons.find(
+            c => c.demuxerMapKey === mapKey && c.originalIndex === originalIdx,
+        );
+        if (!comp) continue;
+
+        if (mod.title !== undefined) comp.muxedTitle = mod.title;
+        if (mod.language !== undefined) comp.muxedLanguage = mod.language;
+        if (mod.delay !== undefined) comp.muxedDelay = mod.delay;
+
+        if (mod.disposition) {
+            // Overrides are keyed by numeric AV_DISPOSITION_* value; comparisons
+            // carry display names, so translate via getDispositionName.
+            const enabled = new Set(comp.muxedDispositions);
+            for (const [dispKey, isOn] of Object.entries(mod.disposition)) {
+                const name = getDispositionName(Number(dispKey) as AVDisposition);
+                if (!name) continue;
+                if (isOn) enabled.add(name);
+                else enabled.delete(name);
             }
-            return -1;
-        }).filter(d => d >= 0),
-        muxedFilename: c.muxedFilename,
-        muxedMimetype: c.muxedMimetype,
-        muxedDelay: c.muxedDelay ?? 0,
-        modify: undefined,
-        modifyType: c.codecType,
-    }));
+            comp.muxedDispositions = [...enabled];
+        }
 
-    applyQueueOverrides(simStreams, queueOverrides);
+        if (mod.tags) {
+            comp.muxedMetadata = { ...(comp.muxedMetadata ?? {}), ...mod.tags };
+        }
 
-    // Rebuild comparisons with updated metadata
-    const newComparisons = buildComparisons(simStreams);
-    return { comparisons: newComparisons, streamInfos: model.streamInfos };
+        // Queue-level compression override. Only meaningful for subtitle tracks;
+        // `!== undefined` so an explicit false is honoured rather than dropped.
+        if (mod.compress !== undefined && comp.codecType === 'subtitle') {
+            comp.muxCompress = mod.compress;
+        }
+    }
+
+    return model;
 }

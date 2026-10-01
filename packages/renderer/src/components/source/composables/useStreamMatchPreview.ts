@@ -3,7 +3,7 @@
  * from the preview components into a single shared composable.
  */
 import type { MatchedTrack } from '@/lib/stream-match';
-import { getCodecLabel, DISPOSITION_LABEL_MAP } from '@/lib/stream-match';
+import { getCodecLabel, isTextSubtitleCodec, DISPOSITION_LABEL_MAP } from '@/lib/stream-match';
 import type { StreamInfo } from '@app/preload';
 import { DISPOSITION_OPTIONS } from '@/components/source/config/disposition-options';
 import { formatBitrate, formatDuration, formatFileSize } from '@/components/source/utils/format-media';
@@ -481,7 +481,22 @@ export function getStreamDetails(
     } else if (type === 3) {
         if (mi) {
             details.push({ label: 'Elements', value: String(mi['ElementCount'] ?? '—') });
-            details.push({ label: 'Compression', value: String(mi['Compression_Mode'] ?? '—') });
+            details.push({ label: 'Codec Compression', value: String(mi['Compression_Mode'] ?? '—') });
+        }
+        // Matroska-level zlib compression (applied by mkvmerge, since FFmpeg's
+        // Matroska muxer cannot write ContentEncodings). Only offered for text-based
+        // codecs — bitmap subs cannot carry it.
+        if (isTextSubtitleCodec(info.codecId, info.codecName)) {
+            const modCompress = modify?.compress as boolean | undefined;
+            const ovrCompress = trackOverride('compress') as boolean | undefined;
+            // Per-track override wins, then the match-item modify block, then the
+            // `true` default applied by the muxer.
+            const effectiveCompress = ovrCompress !== undefined ? ovrCompress : (modCompress !== undefined ? modCompress : true);
+            if (effectiveCompress) {
+                details.push({ label: 'zlib Compression', value: ovrCompress !== undefined ? 'zlib (override)' : 'zlib', changed: true, before: 'none', after: 'zlib', overridable: true, overridden: ovrCompress !== undefined, overrideField: 'compress', overrideValue: ovrCompress });
+            } else {
+                details.push({ label: 'zlib Compression', value: 'none', overridable: true, overridden: ovrCompress !== undefined, overrideField: 'compress', overrideValue: ovrCompress });
+            }
         }
         details.push({ label: 'Bitrate', value: formatBitrate(bitRate) });
         if (mi?.['StreamSize']) {

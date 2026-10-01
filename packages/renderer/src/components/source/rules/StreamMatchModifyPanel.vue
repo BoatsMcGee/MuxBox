@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { X, Plus } from '@lucide/vue';
+import { X, Plus, Info } from '@lucide/vue';
 import UiButton from '@/components/ui/ui-button.vue';
 import { SwitchRoot, SwitchThumb, TooltipRoot, TooltipTrigger, TooltipContent, DropdownMenuRoot, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from 'reka-ui';
 import type { StreamItem, DispositionOption, TagEntry, StreamType } from '@/components/source/types/stream-match-constants';
@@ -187,6 +187,27 @@ function onValueChange(dispKey: string, value: boolean) {
                     class="flex-1 px-2 py-1 text-xs border rounded-md bg-background"
                     placeholder="e.g. 150" :value="(item.modify?.delay as number | undefined) ?? ''"
                     @input="emit('set-field', 'delay', ($event.target as HTMLInputElement).value === '' ? undefined : Number(($event.target as HTMLInputElement).value))" />
+            </div>
+            <!-- zlib compression: subtitle only, defaults to on when unset -->
+            <div v-if="streamType === 'subtitle'" class="flex items-center gap-2">
+                <label class="text-xs text-muted-foreground w-20 shrink-0">Compression</label>
+                <SwitchRoot
+                    :model-value="item.modify?.compress !== false"
+                    class="inline-flex shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background data-[state=checked]:bg-primary data-[state=unchecked]:bg-input h-4 w-7"
+                    @update:model-value="(v: boolean) => emit('set-field', 'compress', v)">
+                    <SwitchThumb class="pointer-events-none block rounded-full bg-background shadow-lg ring-0 transition-transform h-3 w-3 data-[state=checked]:translate-x-3 data-[state=unchecked]:translate-x-0" />
+                </SwitchRoot>
+                <span class="text-xs text-muted-foreground">zlib</span>
+                <TooltipRoot :delay-duration="200">
+                    <TooltipTrigger as-child>
+                        <button type="button" class="text-muted-foreground hover:text-foreground transition-colors" aria-label="About subtitle compression">
+                            <Info class="w-3.5 h-3.5" />
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" class="z-50 max-w-64 rounded-lg border bg-popover px-3 py-1.5 text-xs text-popover-foreground shadow-md">
+                        Applies only to text-based subtitles (SubRip, ASS/SSA, WebVTT). Bitmap subtitles like PGS and VobSub are already compressed and are skipped. On by default.
+                    </TooltipContent>
+                </TooltipRoot>
             </div>
             <!-- Tags -->
             <div class="space-y-1">

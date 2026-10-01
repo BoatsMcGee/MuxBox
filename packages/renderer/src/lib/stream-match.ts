@@ -168,6 +168,68 @@ export function getStreamTypeLabel(codecType: number): string {
 }
 
 /**
+ * AVCodecID variable names for text-based subtitle codecs, as reported by the
+ * `getCodecEntryList()` bridge (e.g. `AV_CODEC_ID_SUBRIP`).
+ *
+ * Mirrors the allowlist in `@app/mkvtoolnix`'s `isTextBasedSubtitleTrack` — bitmap
+ * subtitle codecs (PGS, VoBSub, DVB, XSUB) are already compressed and cannot carry a
+ * Matroska `ContentEncodings` element, so they are excluded.
+ */
+const TEXT_SUBTITLE_CODEC_VAR_NAMES: ReadonlySet<string> = new Set([
+    'AV_CODEC_ID_SUBRIP',
+    'AV_CODEC_ID_ASS',
+    'AV_CODEC_ID_SSA',
+    'AV_CODEC_ID_WEBVTT',
+    'AV_CODEC_ID_TEXT',
+    'AV_CODEC_ID_MOV_TEXT',
+    'AV_CODEC_ID_SRT',
+    'AV_CODEC_ID_SUBTITLE',
+]);
+
+/**
+ * Codec names for text-based subtitles, matched case-insensitively.
+  *
+  * These come from the muxer package's `getCodecName()`, which returns its own
+  * short uppercase aliases (e.g. `SUBRIP`, `WEBVTT`) rather than FFmpeg's raw
+  * names — see `packages/muxer/src/ffmpeg/codec-names.ts`. Bitmap subtitles map to
+  * aliases too (`PGS`, `DVD`, `XSUB`), and are deliberately absent here.
+  *
+  * Mirrors the allowlist in `@app/mkvtoolnix`'s `isTextBasedSubtitleTrack`.
+  */
+const TEXT_SUBTITLE_CODEC_NAMES: ReadonlySet<string> = new Set([
+    'subrip',
+    'srt',
+    'ass',
+    'ssa',
+    'ssa/ass subtitles',
+    'substationalpha',
+    'webvtt',
+    'usf',
+    'text',
+]);
+
+/**
+ * Whether a subtitle track uses a text-based codec and is therefore eligible for
+ * zlib compression.
+ *
+ * Matches on `codecName` (available synchronously on `StreamInfo`). Falls back to the
+ * lazily-loaded codec entry list, and is deliberately conservative: an unrecognised
+ * codec returns false rather than offering compression for a bitmap track.
+ */
+export function isTextSubtitleCodec(codecId: number, codecName?: string): boolean {
+    if (codecName) {
+        return TEXT_SUBTITLE_CODEC_NAMES.has(codecName.trim().toLowerCase());
+    }
+    if (!_codecDisplayEntries) return false;
+    const entry = _codecDisplayEntries.find(e => e.id === codecId);
+    if (!entry) return false;
+    if (entry.friendlyName && TEXT_SUBTITLE_CODEC_NAMES.has(entry.friendlyName.trim().toLowerCase())) {
+        return true;
+    }
+    return TEXT_SUBTITLE_CODEC_VAR_NAMES.has(entry.varName);
+}
+
+/**
  * Normalizes boolean values for comparison, handling string 'true'/'false' from UI selectors.
  */
 function normalizeForComparison(val: unknown): unknown {

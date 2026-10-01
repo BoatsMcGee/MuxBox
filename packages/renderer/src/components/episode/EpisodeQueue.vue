@@ -58,6 +58,11 @@ interface TrackConfigItem {
     muxedDispositions: string[];
     /** Delay per source perTrackModifiers (the source-modified value). */
     muxedDelay: number;
+    /**
+     * Whether this subtitle track will be zlib-compressed. Subtitle tracks only;
+     * undefined for other track types. Defaults to true when not overridden.
+     */
+    muxCompress?: boolean;
 }
 
 interface ChapterEntry {
@@ -180,6 +185,7 @@ function buildTrackItemsFromComparisons(comparisons: TrackComparison[]): TrackCo
             muxedLanguage: comp.muxedLanguage,
             muxedDispositions: [...(comp.muxedDispositions ?? [])],
             muxedDelay: comp.muxedDelay ?? 0,
+            muxCompress: comp.muxCompress,
         });
     }
     return tracks;
@@ -322,7 +328,7 @@ function buildEpisodeFromItem(
 /** Apply stored track overrides to the model (pure data, no live mutation). */
 function applyOverridesToModel(
     tracks: TrackConfigItem[],
-    overrides: Record<string, { title?: string; language?: string; disposition?: Record<string, boolean>; tags?: Record<string, string> }> | undefined,
+    overrides: Record<string, { title?: string; language?: string; delay?: number; disposition?: Record<string, boolean>; tags?: Record<string, string>; compress?: boolean }> | undefined,
 ): void {
     if (!overrides) return;
     // Map of disposition numeric key → display label
@@ -359,6 +365,14 @@ function applyOverridesToModel(
                 if (value === '') delete matchingTrack.muxedTags[key];
                 else matchingTrack.muxedTags[key] = value;
             }
+        }
+        if (mod.delay !== undefined) {
+            matchingTrack.currentDelay = mod.delay;
+        }
+        // Queue-level compression override (subtitle tracks only). `!== undefined`
+        // so an explicit false is honoured rather than falling back to the default.
+        if (mod.compress !== undefined && matchingTrack.type === 'subtitle') {
+            matchingTrack.muxCompress = mod.compress;
         }
     }
 }

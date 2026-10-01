@@ -149,6 +149,7 @@ const subtitleModifySchema = S.object((ctx) => ({
     disposition: ctx.field('disposition', S.optional(dispositionSchema)),
     tags: ctx.field('tags', S.optional(S.record(S.string))),
     delay: ctx.field('delay', S.optional(S.number)),
+    compress: ctx.field('compress', S.optional(S.boolean)),
 }));
 
 const videoPreprocessSchema = S.object((ctx) => ({
@@ -201,13 +202,14 @@ const attachmentItemSchema = S.object((ctx) => ({
 }));
 
 // Per-track inline modifiers (Source.perTrackModifiers):
-// Record<filename, Record<trackIndex, { title?, language?, delay?, disposition?, tags? }>>
+// Record<filename, Record<trackIndex, { title?, language?, delay?, disposition?, tags?, compress? }>>
 const perTrackModifierSchema = S.object((ctx) => ({
     title: ctx.field('title', S.optional(S.string)),
     language: ctx.field('language', S.optional(S.string)),
     delay: ctx.field('delay', S.optional(S.number)),
     disposition: ctx.field('disposition', S.optional(S.record(S.boolean))),
     tags: ctx.field('tags', S.optional(S.record(S.string))),
+    compress: ctx.field('compress', S.optional(S.boolean)),
 }));
 
 // ─── Episode Match Schema ──────────────────────────────────────

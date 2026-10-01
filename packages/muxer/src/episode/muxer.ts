@@ -78,6 +78,14 @@ export class EpisodeMuxer extends EventEmitter implements AsyncDisposable {
     private preprocessAbortController: AbortController | undefined;
 
     /**
+     * 0-based output track indices of subtitle tracks that should be zlib-compressed,
+     * resolved during `mux()`. Consumed by the mkvmerge post-process, which is the only
+     * place compression can be applied — FFmpeg's Matroska muxer cannot write the EBML
+     * `ContentEncodings` element.
+     */
+    compressibleSubtitleTrackIds: number[] = [];
+
+    /**
      * Background tasks (e.g. opusenc pipelines) that must be cleaned up
      * before disposing demuxers. Each task is an async function that stops
      * subprocesses and waits for the pipeline to finish.
@@ -473,6 +481,7 @@ export class EpisodeMuxer extends EventEmitter implements AsyncDisposable {
                     muxedFilename: stream.metadata?.get('filename') ?? undefined,
                     muxedMimetype: stream.metadata?.get('mimetype') ?? undefined,
                     muxedDelay: modify?.delay ?? 0,
+                    muxCompress: modify?.compress ?? true,
                 });
             });
         };
@@ -494,6 +503,14 @@ export class EpisodeMuxer extends EventEmitter implements AsyncDisposable {
         addAttachmentStreams();
 
         this.emit('tracks:ready', trackComparisons);
+
+        // Record which subtitle tracks want zlib compression. Resolved here because
+        // `outputIndex` is only known after addStream; the mkvmerge post-process needs
+        // these to emit `--compression TID:zlib`. Bitmap subtitle codecs are filtered
+        // out later, when the muxed file is probed by mkvmerge.
+        this.compressibleSubtitleTrackIds = trackComparisons
+            .filter(t => t.codecType === 'subtitle' && (t.muxCompress ?? true))
+            .map(t => t.outputIndex);
 
         // Phase 2: Streaming k-way merge
 

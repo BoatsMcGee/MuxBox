@@ -61,6 +61,11 @@ export interface TrackConfigItem {
     muxedDispositions: string[];
     /** Delay per source perTrackModifiers (the source-modified value). */
     muxedDelay: number;
+    /**
+     * Whether this subtitle track will be zlib-compressed. Subtitle tracks only;
+     * undefined for other track types. Defaults to true when not overridden.
+     */
+    muxCompress?: boolean;
 }
 
 interface ChapterEntry {
@@ -175,6 +180,12 @@ function handleTrackDelayUpdate(trackIndex: number, delayMs: number) {
     const track = props.episode.tracks[trackIndex];
     if (!track) return;
     track.currentDelay = delayMs;
+}
+
+function handleTrackCompressUpdate(trackIndex: number, enabled: boolean) {
+    const track = props.episode.tracks[trackIndex];
+    if (!track) return;
+    track.muxCompress = enabled;
 }
 
 function handleTrackDispositionUpdate(trackIndex: number, dispKey: number, enabled: boolean) {
@@ -830,6 +841,7 @@ function handleStop() {
                         @update-track="handleTrackUpdate"
                         @update-track-disposition="handleTrackDispositionUpdate"
                         @update-track-delay="handleTrackDelayUpdate"
+                        @update-track-compress="handleTrackCompressUpdate"
                     />
                 </div>
             </div>

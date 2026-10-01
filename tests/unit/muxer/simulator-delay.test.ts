@@ -134,3 +134,120 @@ describe('buildEpisodeModel delay propagation', () => {
         expect(audio?.muxedDelay).toBe(500);
     });
 });
+
+describe('applyOverridesToModel preserves unrelated fields', () => {
+    /**
+             * Regression guards. The previous implementation rebuilt comparisons via an
+             * intermediate SimulatedStream that set `modify: undefined`, which silently
+             * reset muxedDelay to 0 and dropped muxCompress back to the default.
+             */
+    it('does not reset muxedDelay for tracks without a delay override', () => {
+        const episode = makeEpisode({
+            audio: [{ match: { index: { equal: 1 } }, modify: { delay: 1000 } }],
+        });
+        const streamInfoMap = new Map<string, StreamInfo[]>([
+            [FILE_PATH, [makeStreamInfo(1, 1, 'aac')]],
+        ]);
+
+        const model = buildEpisodeModel(episode, streamInfoMap);
+        const overridden = applyOverridesToModel(model, {
+            // Override a *different* track entirely.
+            [`${FILE_PATH}:99`]: { title: 'Unrelated' },
+        });
+        const audio = overridden.comparisons.find(c => c.codecType === 'audio');
+        expect(audio?.muxedDelay).toBe(1000);
+    });
+
+    it('preserves muxCompress when an unrelated override is applied', () => {
+        const episode = makeEpisode({
+            subtitle: [{ match: { index: { equal: 2 } }, modify: { compress: false } }],
+        });
+        const streamInfoMap = new Map<string, StreamInfo[]>([
+            [FILE_PATH, [makeStreamInfo(2, 3, 'subrip')]],
+        ]);
+
+        const model = buildEpisodeModel(episode, streamInfoMap);
+        const overridden = applyOverridesToModel(model, {
+            [`${FILE_PATH}:2`]: { title: 'Renamed' },
+        });
+        const sub = overridden.comparisons.find(c => c.codecType === 'subtitle');
+        expect(sub?.muxCompress).toBe(false);
+    });
+
+    it('applies a queue-level compress override', () => {
+        const episode = makeEpisode({
+            subtitle: [{ match: { index: { equal: 2 } }, modify: { compress: true } }],
+        });
+        const streamInfoMap = new Map<string, StreamInfo[]>([
+            [FILE_PATH, [makeStreamInfo(2, 3, 'subrip')]],
+        ]);
+
+        const model = buildEpisodeModel(episode, streamInfoMap);
+        const overridden = applyOverridesToModel(model, {
+            [`${FILE_PATH}:2`]: { compress: false },
+        });
+        const sub = overridden.comparisons.find(c => c.codecType === 'subtitle');
+        expect(sub?.muxCompress).toBe(false);
+    });
+
+    it('ignores a compress override on non-subtitle tracks', () => {
+        const episode = makeEpisode({
+            audio: [{ match: { index: { equal: 1 } } }],
+        });
+        const streamInfoMap = new Map<string, StreamInfo[]>([
+            [FILE_PATH, [makeStreamInfo(1, 1, 'aac')]],
+        ]);
+
+        const model = buildEpisodeModel(episode, streamInfoMap);
+        const overridden = applyOverridesToModel(model, {
+            [`${FILE_PATH}:1`]: { compress: false },
+        });
+        const audio = overridden.comparisons.find(c => c.codecType === 'audio');
+        expect(audio?.muxCompress).toBeUndefined();
+    });
+
+    it('preserves muxedDispositions names when translating an override', () => {
+        const episode = makeEpisode({
+            video: [{ match: { index: { equal: 0 } }, modify: { disposition: { 1: true } } }],
+        });
+        const streamInfoMap = new Map<string, StreamInfo[]>([
+            [FILE_PATH, [makeStreamInfo(0, 0, 'h264')]],
+        ]);
+
+        const model = buildEpisodeModel(episode, streamInfoMap);
+        const overridden = applyOverridesToModel(model, {
+            // AV_DISPOSITION_FORCED = 64 → "Forced"
+            [`${FILE_PATH}:0`]: { disposition: { 64: true } },
+        });
+        const video = overridden.comparisons.find(c => c.codecType === 'video');
+        expect(video?.muxedDispositions).toEqual(expect.arrayContaining(['Default', 'Forced']));
+    });
+
+    it('removes a disposition when overridden to false', () => {
+        const episode = makeEpisode({
+            video: [{ match: { index: { equal: 0 } }, modify: { disposition: { 64: true } } }],
+        });
+        const streamInfoMap = new Map<string, StreamInfo[]>([
+            [FILE_PATH, [makeStreamInfo(0, 0, 'h264')]],
+        ]);
+
+        const model = buildEpisodeModel(episode, streamInfoMap);
+        const overridden = applyOverridesToModel(model, {
+            [`${FILE_PATH}:0`]: { disposition: { 64: false } },
+        });
+        const video = overridden.comparisons.find(c => c.codecType === 'video');
+        expect(video?.muxedDispositions).not.toContain('Forced');
+    });
+
+    it('returns the model untouched when overrides are undefined', () => {
+        const episode = makeEpisode({
+            subtitle: [{ match: { index: { equal: 2 } }, modify: { compress: false } }],
+        });
+        const streamInfoMap = new Map<string, StreamInfo[]>([
+            [FILE_PATH, [makeStreamInfo(2, 3, 'subrip')]],
+        ]);
+
+        const model = buildEpisodeModel(episode, streamInfoMap);
+        expect(applyOverridesToModel(model, undefined)).toBe(model);
+    });
+});

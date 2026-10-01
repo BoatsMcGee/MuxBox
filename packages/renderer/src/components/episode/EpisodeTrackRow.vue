@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, nextTick } from 'vue';
 import { Plus, X, Undo2, Volume2, MessageSquareText, Paperclip, Video } from '@lucide/vue';
-import { PopoverRoot, PopoverTrigger, PopoverPortal, PopoverContent, SwitchRoot, SwitchThumb } from 'reka-ui';
+import { PopoverRoot, PopoverTrigger, PopoverPortal, PopoverContent, SwitchRoot, SwitchThumb, TooltipRoot, TooltipTrigger, TooltipContent } from 'reka-ui';
 import { STREAM_TYPE_INFO } from '@/lib/stream-types';
+import { isTextSubtitleCodec } from '@/lib/stream-match';
 import { useEpisodeQueueStore } from '@/stores/useEpisodeQueueStore';
 import { useProjectStore } from '@/stores/useProjectStore';
-import type { ProjectData } from '@app/preload';
+import type { ProjectData, PerTrackModifier } from '@app/preload';
 import type { TrackConfigItem } from './EpisodeQueueItem.vue';
 
 defineOptions({ name: 'EpisodeTrackRow' });
@@ -25,7 +26,8 @@ const emit = defineEmits<{
     (e: 'update-track', trackIndex: number, field: 'title' | 'language', value: string | undefined): void;
     (e: 'update-track-disposition', trackIndex: number, dispKey: number, enabled: boolean): void;
     (e: 'update-track-delay', trackIndex: number, delayMs: number): void;
-}>();
+        (e: 'update-track-compress', trackIndex: number, enabled: boolean): void;
+    }>();
 
 const queueStore = useEpisodeQueueStore();
 const projectStore = useProjectStore();
@@ -88,6 +90,13 @@ function updateTrackOverride(field: string, value: string | undefined, dispositi
                 delete entry.delay;
             } else {
                 entry.delay = num;
+            }
+        } else if (field === 'compress') {
+            // value is "true" or "false"
+            if (value === undefined || value === '') {
+                delete entry.compress;
+            } else {
+                entry.compress = value === 'true';
             }
         } else if (field === 'deleteTag' && value) {
             // Empty string marks a tag as deleted (preserves the key for undo)
@@ -173,6 +182,43 @@ const languageOverridden = computed(() => props.track.language !== props.track.m
 /** True when the current delay differs from the source-modified delay. */
 const delayOverridden = computed(() => props.track.currentDelay !== props.track.muxedDelay);
 
+/**
+ * Show the zlib compression row only for text-based subtitle tracks — bitmap
+ * subtitles (PGS, VobSub) are already compressed and are never re-compressed.
+ * Mirrors the filter in Stream Match Preview so both views agree.
+ */
+const showCompress = computed(() =>
+    props.track.type === 'subtitle' && isTextSubtitleCodec(0, props.track.codec),
+);
+
+/** Effective compression state: queue override wins over the source-modified value. */
+const compressOverride = computed(() => {
+    if (!props.episodeId) return undefined;
+    return overrideValue('compress');
+});
+
+/** True when the queue override differs from the source-configured value. */
+const compressOverridden = computed(() =>
+    compressOverride.value !== undefined && compressOverride.value !== props.track.muxCompress,
+);
+
+/** Persist a compression override through travels so undo/redo works. */
+function updateCompress(value: boolean) {
+    if (isThisEpisodeMuxing.value || !props.track.matched) return;
+    updateTrackOverride('compress', String(value));
+    emit('update-track-compress', props.track.index, value);
+}
+
+/** Reset compression back to the source-configured value. */
+function resetCompress() {
+    if (isThisEpisodeMuxing.value || !props.track.matched) return;
+    // `muxCompress` is optional and defaults to true when the muxer has no
+    // explicit setting, so fall back rather than emitting undefined.
+    const restored = props.track.muxCompress ?? true;
+    updateTrackOverride('compress', undefined);
+    emit('update-track-compress', props.track.index, restored);
+}
+
 /** Persist a delay override. */
 function updateDelay(value: string) {
     if (isThisEpisodeMuxing.value || !props.track.matched) return;
@@ -233,6 +279,15 @@ function updateFilename(value: string | undefined) {
 
 /** Stable key used in queueTrackOverrides for this track. */
 const stableKey = computed(() => `${props.track.demuxerMapKey}:${props.track.fileStreamIndex}`);
+
+/** Read a single field from this track's stored queue override, if any. */
+function overrideValue<T>(field: string): T | undefined {
+    const project = projectStore.currentProject;
+    if (!project) return undefined;
+    return project.queueTrackOverrides?.[props.episodeId]?.[
+        `${props.track.demuxerMapKey}:${props.track.fileStreamIndex}`
+    ]?.[field as keyof PerTrackModifier] as T | undefined;
+}
 
 /**
  * Load existing override tags from the project store on mount.
@@ -693,6 +748,35 @@ const DISPOSITION_OPTIONS = [
                             </PopoverRoot>
                         </div>
                     </div>
+                    </div>
+
+                    <!-- zlib compression (subtitle text tracks only) -->
+                    <div v-if="showCompress" class="flex justify-between py-0.5 items-center gap-1">
+                        <span class="text-muted-foreground">zlib Compression</span>
+                        <div class="flex items-center gap-1">
+                            <TooltipRoot :delay-duration="200">
+                                <TooltipTrigger as-child>
+                                    <SwitchRoot
+                                        :model-value="compressOverride ?? track.muxCompress !== false"
+                                        :disabled="!track.matched || isThisEpisodeMuxing"
+                                        class="inline-flex shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors disabled:cursor-not-allowed disabled:opacity-50 aria-checked:bg-primary aria-not-checked:bg-muted-foreground h-3 w-5"
+                                        @update:model-value="(v) => updateCompress(v === true)">
+                                        <SwitchThumb class="pointer-events-none block rounded-full bg-background shadow-lg ring-0 transition-transform h-2 w-2 aria-checked:translate-x-2 aria-not-checked:translate-x-0" />
+                                    </SwitchRoot>
+                                </TooltipTrigger>
+                                <TooltipContent side="top" class="z-50 max-w-64 rounded-lg border bg-popover px-3 py-1.5 text-xs text-popover-foreground shadow-md">
+                                    Compress this track's text subtitles with zlib. Only applies to text-based subtitles — bitmap tracks like PGS and VobSub are already compressed and are skipped. On by default.
+                                </TooltipContent>
+                            </TooltipRoot>
+                            <!-- Reset button (appears when an override is set) -->
+                            <button v-if="compressOverridden"
+                                class="shrink-0 text-muted-foreground hover:text-destructive transition-colors p-0.5"
+                                title="Reset to source configuration"
+                                :disabled="!track.matched || isThisEpisodeMuxing"
+                                @click="resetCompress()">
+                                <Undo2 class="w-2.5 h-2.5" />
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Delay (editable for video/audio/subtitle) -->

@@ -178,6 +178,8 @@ export function mergeTrackModifier(base: Record<string, unknown>, override: PerT
     if (override.disposition !== undefined) {
         result.disposition = { ...(result.disposition as Record<string, boolean> ?? {}), ...override.disposition };
     }
+    // Explicit `!== undefined` so an explicit `false` override wins over the default.
+    if (override.compress !== undefined) result.compress = override.compress;
     return result;
 }
 
@@ -188,6 +190,8 @@ export interface PerTrackModifier {
     delay?: number;
     disposition?: Record<string, boolean>;
     tags?: Record<string, string>;
+    /** Overrides `modify.compress` for this track. Undefined means "inherit". */
+    compress?: boolean;
 }
 
 export abstract class BaseSelector<

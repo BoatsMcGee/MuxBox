@@ -81,6 +81,12 @@ export interface TrackComparison {
     /** Attachment MIME type from metadata.mimetype */
     muxedMimetype: string | undefined;
     /**
+     * Whether this track should be zlib-compressed. Subtitle tracks only;
+     * `undefined` for other codec types. Defaults to true when the user has not
+     * overridden it.
+     */
+    muxCompress?: boolean;
+    /**
      * Full muxed (output) metadata dict after source modifications.
      * Populated in the simulator path; may be absent in real muxer path.
      */

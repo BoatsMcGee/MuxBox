@@ -19,6 +19,7 @@ import {
     activeTags,
     activeTagsRaw,
     computeNewTag,
+    getTrackModifier,
     type DetailRow,
 } from '@/components/source/composables/useStreamMatchPreview';
 
@@ -77,6 +78,17 @@ const trackAvailDisp = () => availableDispositions(props.perTrackModifiersByFile
 const trackDispRaw = () => activeDispositionsRaw(props.perTrackModifiersByFile, props.file, props.track.index);
 const trackTags = () => activeTags(props.perTrackModifiersByFile, props.file, props.track.index);
 const trackTagsRaw = () => activeTagsRaw(props.perTrackModifiersByFile, props.file, props.track.index);
+
+/**
+ * Effective zlib compression for this track: per-track override wins, then the
+ * match-item `modify.compress`, then the `true` default the muxer applies.
+ * Used to seed the override switch when no explicit override is set.
+ */
+function effectiveCompress(): boolean {
+    const ovr = getTrackModifier(props.perTrackModifiersByFile, props.file, props.track.index, 'compress');
+    if (typeof ovr === 'boolean') return ovr;
+    return true;
+}
 
 function addTagLocal() {
     const newTags = computeNewTag(props.perTrackModifiersByFile, props.file, props.track.index);
@@ -284,6 +296,29 @@ function addTagLocal() {
                                                     <button v-if="detail.overridden"
                                                         class="text-[10px] text-muted-foreground hover:text-destructive underline"
                                                         @click="emit('clearPerTrackModifier', file, track.index, 'delay')">
+                                                        Clear override
+                                                    </button>
+                                                </div>
+                                            </template>
+                                            <!-- zlib compression override -->
+                                            <template v-else-if="detail.overrideField === 'compress'">
+                                                <div class="space-y-1.5">
+                                                    <label class="text-xs font-medium">zlib Compression</label>
+                                                    <div class="flex items-center gap-2">
+                                                        <SwitchRoot
+                                                            :model-value="(detail.overrideValue as boolean | undefined) ?? effectiveCompress()"
+                                                            class="inline-flex shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors data-[state=checked]:bg-primary data-[state=unchecked]:bg-input h-4 w-7"
+                                                            @update:model-value="(v: boolean) => emit('update:perTrackModifier', file, track.index, 'compress', v)">
+                                                            <SwitchThumb class="pointer-events-none block rounded-full bg-background shadow-lg ring-0 transition-transform h-3 w-3 data-[state=checked]:translate-x-3 data-[state=unchecked]:translate-x-0" />
+                                                        </SwitchRoot>
+                                                        <span class="text-[10px] text-muted-foreground">
+                                                            {{ ((detail.overrideValue as boolean | undefined) ?? effectiveCompress()) ? 'On' : 'Off' }}
+                                                        </span>
+                                                    </div>
+                                                    <p class="text-[10px] text-muted-foreground">Compress this track's text subtitles with zlib.</p>
+                                                    <button v-if="detail.overridden"
+                                                        class="text-[10px] text-muted-foreground hover:text-destructive underline"
+                                                        @click="emit('clearPerTrackModifier', file, track.index, 'compress')">
                                                         Clear override
                                                     </button>
                                                 </div>
